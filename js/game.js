@@ -225,6 +225,8 @@ export class Game {
                 block(x, y, w, h, steel);
         }
         this.mapVersion = (this.mapVersion || 0) + 1;
+        // 布局版本只在整张地图重建时递增；联机服务器据此判断是否需要重新下发完整掩体布局。
+        this.layoutVersion = (this.layoutVersion || 0) + 1;
     }
     /** 开战入口由一次用户操作触发，音频解锁在界面控制层完成。 */
     start(mode = 1, chapter = 0) {

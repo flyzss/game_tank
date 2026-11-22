@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../js/game.js';
 import { WAVES, UPGRADES, MAX_ENEMIES } from '../js/config.js';
-import { createSnapshot } from '../js/protocol.js';
+import { createSnapshot, expandSnapshot } from '../js/protocol.js';
 
 /** 使用正式模拟器创建对局；events 记录模拟层发出的界面事件，便于断言提示文本。 */
 function setup(chapter = 0, mode = 1) {
@@ -264,4 +264,43 @@ test('连锁闪电命中后跳向附近敌人，高爆弹头对周围敌军溅�
     g.createBullet(p, 0, false, 2000, 50, { explosive: p.explosive });
     g.updateBullets(0.1);
     assert.ok(b.hp < b.maxHp, '相邻敌军受到溅射');
+});
+
+test('精简快照：省略敌人配置默认值与玩家服务器字段，客户端还原后渲染数据一致', () => {
+    const { g } = setup(1);
+    g.makeMap();
+    const normal = enemyAt(g, 'heavy', 400, 300);
+    const bounty = enemyAt(g, 'raider', 600, 300);
+    bounty.color = '#f2c35b';
+    bounty.radius += 3;
+    const wall = g.walls.find((w) => !w.steel);
+    wall.hp = 40;
+    const packet = JSON.parse(JSON.stringify(createSnapshot(g)));
+    // 默认值与服务器字段不下发，掩体只带耐久数组。
+    assert.equal(packet.enemies[0].name, undefined);
+    assert.equal(packet.enemies[0].damage, undefined);
+    assert.equal(packet.enemies[1].color, '#f2c35b');
+    assert.equal(packet.players[0].damage, undefined);
+    assert.equal(packet.walls, undefined);
+    assert.equal(packet.wallHp.length, g.walls.length);
+    // 客户端：先用含完整布局的快照建立掩体，再用普通快照更新耐久。
+    const client = new Game({ play() {}, update() {} }, () => {});
+    const full = JSON.parse(JSON.stringify(createSnapshot(g, { walls: true })));
+    Object.assign(client, full);
+    expandSnapshot(client, full);
+    wall.hp = 10;
+    const next = JSON.parse(JSON.stringify(createSnapshot(g)));
+    Object.assign(client, next);
+    expandSnapshot(client, next);
+    const index = g.walls.indexOf(wall);
+    assert.equal(client.walls[index].hp, 10);
+    assert.ok(client.walls[index].hit > 0, '耐久下降触发受击闪光');
+    assert.ok(client.walls.filter((w) => w.steel).every((w) => w.hp > 0));
+    const [a, b] = client.enemies;
+    assert.equal(a.name, normal.name);
+    assert.equal(a.radius, normal.radius);
+    assert.equal(a.color, normal.color);
+    assert.equal(b.color, '#f2c35b');
+    assert.equal(b.radius, bounty.radius);
+    assert.ok(Math.abs(a.maxHp - normal.maxHp) < 0.01);
 });

@@ -1,4 +1,5 @@
 import { UPGRADES } from './config.js';
+import { expandSnapshot } from './protocol.js';
 import { clamp } from './game.js';
 import { websocketUrl, roomStorageKey } from './paths.js';
 
@@ -153,6 +154,8 @@ export class OnlineSession {
         );
         const snapshot = data.snapshot;
         Object.assign(this.game, snapshot);
+        // 敌人精简字段与掩体耐久数组需要还原成渲染与本地碰撞预测可直接使用的完整结构。
+        expandSnapshot(this.game, snapshot);
         this.game.choices = (snapshot.choices || [])
             .map((id) => UPGRADES.find((u) => u.id === id))
             .filter(Boolean);

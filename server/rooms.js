@@ -1,6 +1,6 @@
 import { randomBytes, randomInt } from 'node:crypto';
 import { Game } from '../js/game.js';
-import { createSnapshot, sanitizeInput } from '../js/protocol.js';
+import { createSnapshot, serializeWalls, sanitizeInput } from '../js/protocol.js';
 import { ZONES } from '../js/config.js';
 
 /** 房间管理器独立于 HTTP 层，真实服务器和网络回归测试共用同一套状态机。 */
@@ -52,13 +52,16 @@ export class RoomManager {
             token: peer.token,
         });
         if (old && old !== socket) old.close(4001, 'replaced');
-        if (room.game)
+        if (room.game) {
+            // 新连接（含刷新重连）没有任何掩体数据，首张快照必须携带完整布局，并记录已同步的布局版本。
             this.send(socket, {
                 type: 'state',
-                snapshot: createSnapshot(room.game),
+                snapshot: createSnapshot(room.game, { walls: true }),
                 events: [],
                 seq: room.seq,
             });
+            socket.layoutVersion = room.game.layoutVersion;
+        }
         if (room.linkPaused && room.peers.length === 2 && room.peers.every((p) => p.socket)) {
             room.linkPaused = false;
             room.pauseReason = '';
@@ -77,10 +80,10 @@ export class RoomManager {
         if (type === 'create') {
             if (socket.room) return this.error(socket, '请先离开当前房间');
             if (this.rooms.size >= this.maxRooms) return this.error(socket, '房间已满，请稍后重试');
+            // 房间码为 6 位纯数字（100000–999999，首位不为 0），便于语音报号与手机数字键盘输入。
             let code;
-            const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
             do {
-                code = Array.from({ length: 6 }, () => alphabet[randomInt(alphabet.length)]).join('');
+                code = String(randomInt(100000, 1000000));
             } while (this.rooms.has(code));
             const room = {
                 code,
@@ -104,7 +107,8 @@ export class RoomManager {
         }
         if (type === 'join' || type === 'resumeRoom') {
             if (socket.room) return this.error(socket, '已经在房间中');
-            const code = typeof message.code === 'string' ? message.code.trim().toUpperCase() : '';
+            // 忽略空格、短横线等分隔符：玩家照着「123 456」的分组显示输入也能加入。
+            const code = typeof message.code === 'string' ? message.code.replace(/\D/g, '') : '';
             const room = this.rooms.get(code);
             if (!room) return this.error(socket, '房间不存在或已关闭');
             let peer;
@@ -252,13 +256,17 @@ export class RoomManager {
             peer.backlog = (peer.backlog || []).concat(events);
             if (peer.backlog.length > 200) peer.backlog.splice(0, peer.backlog.length - 200);
             if (!peer.socket || peer.socket.bufferedAmount > 96000) continue;
+            // 掩体布局按连接追踪：只有这条连接尚未收到当前布局（新开局、换战区、重连）时才附带约 2KB 的完整掩体，
+            // 其余快照只带 wallHp 耐久数组。只有真正发出后才记录版本，跳帧不会导致客户端缺少布局。
+            const needsWalls = peer.socket.layoutVersion !== room.game.layoutVersion;
             this.send(peer.socket, {
                 type: 'state',
                 seq: room.seq,
-                snapshot,
+                snapshot: needsWalls ? { ...snapshot, walls: serializeWalls(room.game) } : snapshot,
                 events: peer.backlog,
                 bursts,
             });
+            if (needsWalls) peer.socket.layoutVersion = room.game.layoutVersion;
             peer.backlog = [];
         }
         if (room.events.length > 160) room.events.splice(0, room.events.length - 160);

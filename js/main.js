@@ -46,6 +46,13 @@ function hideModal() {
     if (lastFocus && document.contains(lastFocus)) lastFocus.focus({ preventScroll: true });
     lastFocus = null;
 }
+/**
+ * 房间码分组显示：6 位数字显示为「123 456」，语音报号时更容易听清和记住；
+ * 参数 code 为服务器下发的纯数字房间码，非 6 位时原样返回。
+ */
+function formatRoomCode(code) {
+    return /^\d{6}$/.test(String(code)) ? `${String(code).slice(0, 3)} ${String(code).slice(3)}` : String(code);
+}
 /** 消息提示覆盖前一条短提示，保证重复拾取不会积累无穷个计时器。 */
 function toast(text) {
     clearTimeout(toastTimer);
@@ -287,15 +294,16 @@ function activateOnlineBattle() {
 /** 联机入口给出创建与加入两条明确路径，章节沿用当前选择。 */
 function showOnlineMenu(error = '') {
     showModal(
-        `<h2 id="modal-title">一起守住这道防线。</h2><p>两位指挥官，各自驾驶战车，共享核心与战场。<br>同一网络或同一个公开游戏网址即可组队。</p><div class="online-form"><button id="create-room" class="primary-button">创建房间 · ${ZONES[Number($('chapter-select').value)].name}</button><div class="join-room"><label for="room-code-input">已有房间码</label><input id="room-code-input" maxlength="6" autocomplete="off" placeholder="6 位房间码" value="${(new URLSearchParams(location.search).get('room') || '').replace(/[^A-Z2-9]/gi, '').slice(0, 6)}"><button id="join-room" class="secondary-button">加入房间</button></div><p id="room-error" class="room-error" role="status"></p></div><button id="online-back" class="secondary-button">返回</button>`,
+        `<h2 id="modal-title">一起守住这道防线。</h2><p>两位指挥官，各自驾驶战车，共享核心与战场。<br>同一网络或同一个公开游戏网址即可组队。</p><div class="online-form"><button id="create-room" class="primary-button">创建房间 · ${ZONES[Number($('chapter-select').value)].name}</button><div class="join-room"><label for="room-code-input">已有房间码</label><input id="room-code-input" maxlength="7" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" placeholder="6 位数字房间码" value="${(new URLSearchParams(location.search).get('room') || '').replace(/\D/g, '').slice(0, 6)}"><button id="join-room" class="secondary-button">加入房间</button></div><p id="room-error" class="room-error" role="status"></p></div><button id="online-back" class="secondary-button">返回</button>`,
     );
     $('room-error').textContent = error;
     $('create-room').onclick = () =>
         connectRoom({ type: 'create', chapter: Number($('chapter-select').value) });
     $('join-room').onclick = () => {
-        const code = $('room-code-input').value.trim().toUpperCase();
-        if (!/^[A-Z2-9]{6}$/.test(code)) {
-            $('room-error').textContent = '请输入完整的 6 位房间码';
+        // 只保留数字：允许玩家按语音听到的「123 456」分组带空格输入。
+        const code = $('room-code-input').value.replace(/\D/g, '');
+        if (!/^\d{6}$/.test(code)) {
+            $('room-error').textContent = '请输入完整的 6 位数字房间码';
             return;
         }
         connectRoom({ type: 'join', code });
@@ -337,7 +345,7 @@ function showLobby(room) {
     const invite = appUrl('index.htm', inviteBase);
     invite.searchParams.set('room', room.code);
     showModal(
-        `<h2 id="modal-title">房间 ${room.code}</h2><p>${ZONES[room.chapter].name} · P${online.slot} 指挥官<br>复制邀请给队友，两人准备后由房主启动。</p><div class="room-members">${[
+        `<h2 id="modal-title">房间 ${formatRoomCode(room.code)}</h2><p>${ZONES[room.chapter].name} · P${online.slot} 指挥官<br>复制邀请给队友，两人准备后由房主启动。</p><div class="room-members">${[
             1, 2,
         ]
             .map((slot) => {
@@ -370,7 +378,7 @@ function showLobby(room) {
 function handleOnlineEvent(event, data) {
     if (event === 'room') {
         $('room-button').hidden = false;
-        $('room-button').querySelector('span').textContent = `房间 ${data.code}`;
+        $('room-button').querySelector('span').textContent = `房间 ${formatRoomCode(data.code)}`;
         if (data.phase === 'lobby') showLobby(data);
         if ($('vote-status'))
             $('vote-status').textContent =

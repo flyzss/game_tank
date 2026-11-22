@@ -46,10 +46,12 @@ test('两个真实客户端完成建房、准备、权威移动、技能、暂�
         host.send({ type: 'create', chapter: 0 });
         const first = await host.wait((m) => m.type === 'joined');
         assert.equal(first.slot, 1);
-        assert.match(first.room.code, /^[A-Z2-9]{6}$/);
+        // 房间码为首位非零的 6 位纯数字，便于语音报号。
+        assert.match(first.room.code, /^[1-9]\d{5}$/);
         const guest = await connect(app.port);
         clients.push(guest);
-        guest.send({ type: 'join', code: first.room.code });
+        // 按界面「123 456」的分组带空格输入，服务器应忽略分隔符照常加入。
+        guest.send({ type: 'join', code: `${first.room.code.slice(0, 3)} ${first.room.code.slice(3)}` });
         const second = await guest.wait((m) => m.type === 'joined');
         assert.equal(second.slot, 2);
         assert.notEqual(second.token, first.token);

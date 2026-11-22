@@ -115,7 +115,7 @@ test('超频电池与纳米修复使用正式计时，网络输入不能越界�
     assert.equal(input.aim, null);
     assert.equal(input.fire, false);
     assert.equal(input.hp, undefined);
-    const packet = createSnapshot(g);
+    const packet = createSnapshot(g, { walls: true });
     assert.ok(packet.walls.filter((w) => w.steel).every((w) => w.hp > 0));
     assert.equal(packet.controls, undefined);
     assert.equal(packet.commandSender, undefined);

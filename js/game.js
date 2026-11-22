@@ -1,4 +1,4 @@
-import { WORLD, WAVES, ENEMIES, UPGRADES, FIELD_EVENTS, ZONES, MAX_ENEMIES, WEAPONS, AFFIXES, RARITY } from './config.js';
+import { WORLD, WAVES, ENEMIES, UPGRADES, FIELD_EVENTS, ZONES, MAX_ENEMIES, WEAPONS, AFFIXES, RARITY, CHASSIS, TALENTS, ASCENSION } from './config.js';
 
 /** 数值工具集中定义，碰撞和距离始终使用逻辑战场坐标而非屏幕像素。 */
 export const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -70,6 +70,9 @@ export class Game {
         this.announce = null;
         // 每局 2 次改装刷新；S 级评价额外奖励 1 次。
         this.rerolls = 2;
+        // 局外成长：余烬等级（0 为标准难度）与本局生效的天赋等级；start 时按开局参数覆盖。
+        this.ascension = 0;
+        this.talents = {};
         // 首领终结慢动作剩余秒数（真实时间），期间模拟按 30% 速度推进。
         this.slowmo = 0;
         // 波次评级统计：本波承受的总伤害（玩家装甲 + 核心）与最高连击；lastGrade 为上一波的评级结果。
@@ -242,22 +245,67 @@ export class Game {
         // 布局版本只在整张地图重建时递增；联机服务器据此判断是否需要重新下发完整掩体布局。
         this.layoutVersion = (this.layoutVersion || 0) + 1;
     }
-    /** 开战入口由一次用户操作触发，音频解锁在界面控制层完成。 */
-    start(mode = 1, chapter = 0) {
+    /**
+     * 开战入口由一次用户操作触发，音频解锁在界面控制层完成。
+     * 参数 options（均可省略）：
+     * - chassis：按玩家顺序排列的底盘编号数组，未知编号回落为标准底盘；
+     * - talents：{ 天赋编号: 等级 }，超出范围的等级会被截断（联机时服务器传空对象）；
+     * - ascension：余烬等级 0–10，启用对应及以下全部难度词条。
+     */
+    start(mode = 1, chapter = 0, options = {}) {
         this.mode = mode;
         this.reset();
         this.chapter = clamp(Math.floor(chapter) || 0, 0, ZONES.length - 1);
         this.wave = this.chapter * 6;
+        this.ascension = clamp(Math.floor(options.ascension) || 0, 0, ASCENSION.length);
+        this.talents = {};
+        for (const talent of TALENTS) {
+            const level = Math.floor(options.talents?.[talent.id]) || 0;
+            if (level > 0) this.talents[talent.id] = Math.min(level, talent.costs.length);
+        }
+        // 本局编号：界面用它保证同一局只结算一次余烬碎片（刷新、重连不会重复领取）。
+        this.runId = Math.random().toString(36).slice(2, 10);
+        this.players.forEach((p) => this.applyChassis(p, options.chassis?.[p.id - 1]));
         // 从后续战区直接出击时配发基础作战套件，不要求玩家携带前一章节的存档。
         this.players.forEach((p) => {
             p.damage *= 1 + this.chapter * 0.5;
-            p.maxHp += this.chapter * 25;
+            p.maxHp += this.chapter * 25 + this.talentLevel('armor') * 10;
             p.hp = p.maxHp;
             p.fireRate *= 0.88 ** this.chapter;
         });
+        this.core.maxHp += this.talentLevel('core') * 40;
+        this.core.hp = this.core.maxHp;
+        this.rerolls = Math.max(0, 2 + this.talentLevel('reroll') - (this.asc(9) ? 1 : 0));
+        this.fever = this.talentLevel('fever') * 25;
         this.state = 'playing';
         this.beginWave();
         this.onEvent('start');
+    }
+    /** 当前余烬等级是否已启用第 level 级词条。 */
+    asc(level) {
+        return this.ascension >= level;
+    }
+    /** 读取本局某项天赋的等级，未购买为 0。 */
+    talentLevel(id) {
+        return this.talents?.[id] || 0;
+    }
+    /**
+     * 把底盘属性套用到玩家：先乘 mods，再加 add，最后设置车体半径与自带僚机。
+     * 参数 id 为 CHASSIS 编号，未知或缺省时使用标准底盘；结果记录在 p.chassis 供界面显示。
+     */
+    applyChassis(p, id) {
+        const key = CHASSIS[id] ? id : 'standard';
+        const data = CHASSIS[key];
+        p.chassis = key;
+        for (const [stat, factor] of Object.entries(data.mods || {})) p[stat] *= factor;
+        for (const [stat, value] of Object.entries(data.add || {})) p[stat] += value;
+        if (data.radius) p.radius = data.radius;
+        p.drones += data.drones || 0;
+        p.hp = p.maxHp;
+    }
+    /** 本波实际生成次数：余烬等级 6「人海战术」使数量 +20%。 */
+    waveCount() {
+        return Math.round(WAVES[this.wave - 1].count * (this.asc(6) ? 1.2 : 1));
     }
     /** 每波使用独立生成队列；清场后才进入改装，首领固定出现在最终波。 */
     beginWave() {
@@ -290,6 +338,13 @@ export class Game {
         const fieldEvent = WAVES[this.wave - 1].event;
         this.placeBarrels(fieldEvent === 'barrels');
         // 火力全开：每名存活玩家立即获得一件随机持续型特装武器（不含核弹），开波就能爽射。
+        if (fieldEvent !== 'frenzy' && this.talentLevel('weapon') > 0)
+            this.players
+                .filter((p) => p.hp > 0)
+                .forEach((p) => {
+                    this.giveWeapon(p, ['fan', 'laser', 'rocket', 'lightning'][Math.floor(Math.random() * 4)]);
+                    p.weaponTime = 6;
+                });
         if (fieldEvent === 'frenzy')
             this.players
                 .filter((p) => p.hp > 0)
@@ -330,7 +385,10 @@ export class Game {
             data.hp *
             (1 + Math.max(0, this.wave - 1) * 0.08) *
             (this.mode === 2 ? 1.5 : 1) *
-            (data.boss ? 1 + this.upgrades.length * 0.1 : 1);
+            (data.boss ? 1 + this.upgrades.length * 0.1 : 1) *
+            // 余烬等级 1「坚固敌阵」全体 +15%，等级 8「巨像觉醒」首领再 +30%。
+            (this.asc(1) ? 1.15 : 1) *
+            (data.boss && this.asc(8) ? 1.3 : 1);
         return {
             ...data,
             netId: this.nextEntityId++,
@@ -340,7 +398,10 @@ export class Game {
             hp,
             maxHp: hp,
             // 敌军火力随波次温和成长：每波 +2.5%，第 24 波约为初始的 1.6 倍。
-            damage: data.damage * (1 + Math.max(0, this.wave - 1) * 0.025),
+            // 余烬等级 5「火力升级」敌军伤害再 +20%。
+            damage: data.damage * (1 + Math.max(0, this.wave - 1) * 0.025) * (this.asc(5) ? 1.2 : 1),
+            // 余烬等级 3「急行军」敌军移速 +12%。
+            speed: data.speed * (this.asc(3) ? 1.12 : 1),
             angle: Math.PI / 2,
             bodyAngle: Math.PI / 2,
             fireCd: random(0.8, 2.5),
@@ -382,7 +443,7 @@ export class Game {
         const enemy = this.makeEnemy(type, spot.x + random(-10, 10), spot.y);
         this.rollAffix(enemy);
         // 悬赏精英：本波生成过半时把下一辆普通敌军升级为金色精英，耐久 ×2.5、积分 ×3。
-        if (this.bountyPending && !enemy.boss && this.spawned >= Math.floor(config.count / 2)) {
+        if (this.bountyPending && !enemy.boss && this.spawned >= Math.floor(this.waveCount() / 2)) {
             this.bountyPending = false;
             enemy.bounty = true;
             enemy.hp *= 2.5;
@@ -437,7 +498,8 @@ export class Game {
      */
     rollAffix(enemy) {
         if (enemy.boss || enemy.drone || this.wave < 4) return;
-        if (Math.random() > 0.12 + this.wave * 0.006) return;
+        // 余烬等级 2「精英横行」精英概率翻倍。
+        if (Math.random() > (0.12 + this.wave * 0.006) * (this.asc(2) ? 2 : 1)) return;
         const keys = Object.keys(AFFIXES);
         const affix = keys[Math.floor(Math.random() * keys.length)];
         enemy.affix = affix;
@@ -562,7 +624,8 @@ export class Game {
      */
     addFever(amount) {
         if (this.feverTime > 0) return;
-        this.fever = Math.min(100, this.fever + amount * (this.players[0]?.feverGain || 1));
+        // 余烬等级 10「余烬终焉」狂热积攒速度 −30%。
+        this.fever = Math.min(100, this.fever + amount * (this.players[0]?.feverGain || 1) * (this.asc(10) ? 0.7 : 1));
         if (this.fever < 100) return;
         this.fever = 0;
         this.feverTime = 8 + (this.players[0]?.feverBonus || 0);
@@ -614,11 +677,11 @@ export class Game {
         }
         const config = WAVES[this.wave - 1];
         this.spawnTimer -= dt;
-        if (this.spawned < config.count && this.spawnTimer <= 0 && this.enemies.length < MAX_ENEMIES) {
+        if (this.spawned < this.waveCount() && this.spawnTimer <= 0 && this.enemies.length < MAX_ENEMIES) {
             this.spawnEnemy();
             this.spawnTimer = config.interval;
         }
-        if (this.spawned >= config.count && !this.enemies.length) {
+        if (this.spawned >= this.waveCount() && !this.enemies.length) {
             this.waveDelay += dt;
             if (this.waveDelay > 2) this.completeWave();
         }
@@ -642,14 +705,16 @@ export class Game {
         if (p.hp <= 0) {
             p.deadTime += dt;
             if (p.deadTime >= 7) {
-                if (this.core.hp > 45) {
-                    this.core.hp -= 40;
+                // 余烬等级 4「核心过载」重建代价从 40 提高到 60 核心耐久。
+                const cost = this.asc(4) ? 60 : 40;
+                if (this.core.hp > cost + 5) {
+                    this.core.hp -= cost;
                     p.hp = p.maxHp;
                     p.x = p.id === 1 ? 545 : 735;
                     p.y = 660;
                     p.invincible = 3;
                     p.deadTime = 0;
-                    this.onEvent('toast', `P${p.id} 已重返战场 · 核心消耗 40 耐久`);
+                    this.onEvent('toast', `P${p.id} 已重返战场 · 核心消耗 ${cost} 耐久`);
                     this.burst(p.x, p.y, '#b9edac', 25, 120);
                 } else if (this.players.every((player) => player.hp <= 0)) this.finish(false);
             }
@@ -1700,7 +1765,7 @@ export class Game {
             return;
         }
         const frenzy = WAVES[this.wave - 1]?.event === 'frenzy' ? 3 : 1;
-        if (enemy.affix || enemy.bounty || Math.random() < (enemy.drone ? 0.02 : 0.06) * frenzy) {
+        if (enemy.affix || enemy.bounty || Math.random() < (enemy.drone ? 0.02 : 0.06) * frenzy * (this.asc(7) ? 0.5 : 1)) {
             drop(randomWeapon());
             return;
         }
@@ -1919,7 +1984,8 @@ export class Game {
         this.state = 'upgrade';
         this.bullets = [];
         this.beams = [];
-        this.core.hp = Math.min(this.core.maxHp, this.core.hp + 15);
+        // 余烬等级 4「核心过载」清波不再修复核心。
+        if (!this.asc(4)) this.core.hp = Math.min(this.core.maxHp, this.core.hp + 15);
         this.players.forEach((p) => {
             p.hp = Math.min(p.maxHp, Math.max(p.hp, 1) + 35);
             p.dashCd = 0;
@@ -2025,12 +2091,18 @@ export class Game {
         } catch {
             this.best = this.score;
         }
+        // 附带局外结算需要的信息：本局编号、余烬等级、开局战区与本局肃清的波数（胜利时计满）。
         this.onEvent('finish', {
             win,
             score: this.score,
             kills: this.kills,
             time: this.time,
             best: this.best,
+            runId: this.runId,
+            mode: this.mode,
+            ascension: this.ascension,
+            chapter: this.chapter,
+            cleared: win ? WAVES.length - this.chapter * 6 : Math.max(0, this.wave - 1 - this.chapter * 6),
         });
     }
 }

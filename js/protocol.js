@@ -16,7 +16,7 @@ const ENEMY_DEFAULTS = { hit: 0, recoil: 0, charge: 0, warning: 0, moving: false
 const PLAYER_KEYS = [
     'id', 'x', 'y', 'radius', 'angle', 'bodyAngle', 'hp', 'maxHp', 'speed', 'invincible',
     'dashCd', 'dashTime', 'novaCd', 'supportCd', 'recoil', 'hit', 'moving', 'tread', 'deadTime',
-    'color', 'overdrive', 'shield', 'drones', 'weapon', 'weaponTime', 'joltX', 'joltY',
+    'color', 'overdrive', 'shield', 'drones', 'weapon', 'weaponTime', 'joltX', 'joltY', 'chassis',
 ];
 /** 与 JSON 快照一致的数值压缩：保留两位小数，Infinity（钢墙耐久）写成 1e9。 */
 const roundNumber = (value) => (Number.isFinite(value) ? Math.round(value * 100) / 100 : 1e9);
@@ -89,6 +89,8 @@ export function createSnapshot(game, options = {}) {
         'announce',
         // 改装刷新次数、上一波评级与首领终结慢动作。
         'rerolls',
+        // 余烬等级：客户端 HUD 显示当前难度。
+        'ascension',
         'lastGrade',
         'slowmo',
         'upgrades',

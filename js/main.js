@@ -3,7 +3,33 @@ import { OnlineSession } from './network.js';
 import { appUrl } from './paths.js';
 import { Renderer } from './renderer.js';
 import { SoundDirector } from './sound.js';
-import { WAVES, UPGRADES, ZONES, FIELD_EVENTS, RARITY, iconSvg } from './config.js';
+import { WAVES, UPGRADES, ZONES, FIELD_EVENTS, RARITY, CHASSIS, TALENTS, ASCENSION, iconSvg } from './config.js';
+import {
+    loadMeta,
+    saveMeta,
+    recordRun,
+    buyChassis,
+    selectChassis,
+    buyTalent,
+    talentCost,
+    selectAscension,
+} from './meta.js';
+
+/** 本机存储入口：隐私模式下访问 localStorage 可能直接抛错，此时局外进度只保留在本次会话。 */
+const metaStorage = (() => {
+    try {
+        return window.localStorage;
+    } catch {
+        return null;
+    }
+})();
+/** 局外成长存档（余烬碎片、底盘、天赋、余烬等级），所有修改后都立即写回本机。 */
+const meta = loadMeta(metaStorage);
+/** 修改存档后统一保存并刷新菜单上的碎片数与等级选项。 */
+function commitMeta() {
+    saveMeta(metaStorage, meta);
+    refreshMetaMenu();
+}
 
 /** 应用入口只负责输入与界面，战斗规则和绘图分别在独立模块内。 */
 const $ = (id) => document.getElementById(id);
@@ -77,7 +103,12 @@ async function startGame() {
     $('welcome').hidden = true;
     await sound.unlock();
     updateSoundButton();
-    game.start(mode, Number($('chapter-select').value));
+    // 单机与同屏模式：全队使用机库中选用的底盘，并带上永久天赋与所选余烬等级。
+    game.start(mode, Number($('chapter-select').value), {
+        chassis: [meta.selected, meta.selected],
+        talents: meta.talents,
+        ascension: meta.ascension,
+    });
     document.body.classList.add('playing');
     $('pause-button').disabled = false;
     canvas.style.cursor = 'crosshair';
@@ -178,12 +209,15 @@ function showUpgrades(choices) {
         .forEach((button) => (button.onclick = () => game.chooseUpgrade(button.dataset.upgrade)));
     $('reroll-button').onclick = () => game.rerollUpgrade();
 }
-/** 结算同时呈现本局与本机最高分，提供明确的重玩和退出路径。 */
-function showResult(result) {
+/**
+ * 结算同时呈现本局与本机最高分，提供明确的重玩和退出路径。
+ * 参数 reward 为本局局外结算结果（获得碎片与新解锁等级），重复的结算事件为 null。
+ */
+function showResult(result, reward = null) {
     document.body.classList.remove('playing');
     $('pause-button').disabled = true;
     showModal(
-        `<h2 id="modal-title">${result.win ? '长夜已尽。核心仍亮。' : '防线失守。余烬未熄。'}</h2><p>${result.win ? '二十四道防线，全部守住。裂隙闭合，这座废墟迎来了新的黎明。' : '每一次出击，都更接近黎明。换一种改装，再试一次。'}</p><div class="result-stats"><div><b>${result.score}</b><span>作战积分</span></div><div><b>${result.kills}</b><span>摧毁敌军</span></div><div><b>${formatTime(result.time)}</b><span>行动用时</span></div></div><p>本机最佳 ${result.best} · ${online.active ? '联机合作' : mode === 2 ? '同屏双人' : '单人行动'}</p><button class="primary-button" id="again-button">再度出击 <span>→</span></button><button class="secondary-button" id="result-menu">返回主菜单</button>`,
+        `<h2 id="modal-title">${result.win ? '长夜已尽。核心仍亮。' : '防线失守。余烬未熄。'}</h2><p>${result.win ? '二十四道防线，全部守住。裂隙闭合，这座废墟迎来了新的黎明。' : '每一次出击，都更接近黎明。换一种改装，再试一次。'}</p><div class="result-stats"><div><b>${result.score}</b><span>作战积分</span></div><div><b>${result.kills}</b><span>摧毁敌军</span></div><div><b>${formatTime(result.time)}</b><span>行动用时</span></div></div><p>本机最佳 ${result.best} · ${online.active ? '联机合作' : mode === 2 ? '同屏双人' : '单人行动'}${result.ascension ? ` · 余烬等级 ${result.ascension}` : ''}</p>${reward ? `<p class="result-reward">获得余烬碎片 <b>+${reward.earned}</b> · 现有 ${meta.shards}${reward.unlocked ? `<br><span>解锁余烬等级 ${reward.unlocked}：${ASCENSION[reward.unlocked - 1].name} · ${ASCENSION[reward.unlocked - 1].text}</span>` : ''}</p>` : ''}<button class="primary-button" id="again-button">再度出击 <span>→</span></button><button class="secondary-button" id="result-menu">返回主菜单</button>`,
     );
     $('again-button').onclick = startGame;
     if (online.active && online.slot !== 1) {
@@ -217,7 +251,12 @@ function handleEvent(event, data) {
     }
     if (event === 'field') toast(`${data.name} · ${data.description}`);
     if (event === 'toast') toast(data);
-    if (event === 'finish') showResult(data);
+    if (event === 'finish') {
+        // 局外结算：同一局只领取一次碎片（recordRun 按 runId 去重），然后立即存档。
+        const reward = recordRun(meta, data);
+        if (reward) commitMeta();
+        showResult(data, reward);
+    }
 }
 /** 改装栏合并同类堆叠并保留名称，不用抽象图标替代实际效果说明。 */
 function updateLoadout() {
@@ -263,8 +302,9 @@ function updateHud() {
     $('dash-status').textContent = p.dashCd > 0 ? `${p.dashCd.toFixed(1)}s` : '就绪';
     $('nova-status').textContent = p.novaCd > 0 ? `${p.novaCd.toFixed(1)}s` : '就绪';
     $('support-status').textContent = p.supportCd > 0 ? `${p.supportCd.toFixed(1)}s` : '就绪';
+    // 驾驶员代号固定（游隼 / 雨燕），后半部分显示本局使用的底盘名称。
     document.querySelector('.pilot-id b').textContent =
-        p.id === 2 ? '雨燕 · 协同突击战车' : '游隼 · 轻型突击战车';
+        `${p.id === 2 ? '雨燕' : '游隼'} · ${(CHASSIS[p.chassis] || CHASSIS.standard).name}`;
     document.querySelector('.pilot-mark').textContent = `P${online.active ? online.slot : 1}`;
     const ally = game.players.find((player) => player.id !== p.id);
     const status =
@@ -315,7 +355,7 @@ function showOnlineMenu(error = '') {
     );
     $('room-error').textContent = error;
     $('create-room').onclick = () =>
-        connectRoom({ type: 'create', chapter: Number($('chapter-select').value) });
+        connectRoom({ type: 'create', chapter: Number($('chapter-select').value), ascension: meta.ascension });
     $('join-room').onclick = () => {
         // 只保留数字：允许玩家按语音听到的「123 456」分组带空格输入。
         const code = $('room-code-input').value.replace(/\D/g, '');
@@ -362,12 +402,12 @@ function showLobby(room) {
     const invite = appUrl('index.htm', inviteBase);
     invite.searchParams.set('room', room.code);
     showModal(
-        `<h2 id="modal-title">房间 ${formatRoomCode(room.code)}</h2><p>${ZONES[room.chapter].name} · P${online.slot} 指挥官<br>复制邀请给队友，两人准备后由房主启动。</p><div class="room-members">${[
+        `<h2 id="modal-title">房间 ${formatRoomCode(room.code)}</h2><p>${ZONES[room.chapter].name}${room.ascension ? ` · 余烬等级 ${room.ascension}` : ''} · P${online.slot} 指挥官<br>复制邀请给队友，两人准备后由房主启动。联机不启用永久天赋，底盘按各自机库选择。</p><div class="room-members">${[
             1, 2,
         ]
             .map((slot) => {
                 const p = room.players.find((member) => member.slot === slot);
-                return `<div><b>P${slot} ${slot === 1 ? '游隼 / 房主' : '雨燕 / 队友'}</b><span>${!p ? '等待加入' : !p.connected ? '等待重连' : p.ready ? '已准备' : '尚未准备'}</span></div>`;
+                return `<div><b>P${slot} ${slot === 1 ? '游隼 / 房主' : '雨燕 / 队友'}</b><span>${!p ? '等待加入' : !p.connected ? '等待重连' : p.ready ? `已准备 · ${(CHASSIS[p.chassis] || CHASSIS.standard).short}底盘` : '尚未准备'}</span></div>`;
             })
             .join(
                 '',
@@ -377,7 +417,7 @@ function showLobby(room) {
     $('ready-room').onclick = async () => {
         await sound.unlock();
         updateSoundButton();
-        online.send({ type: 'ready', ready: !me?.ready });
+        online.send({ type: 'ready', ready: !me?.ready, chassis: meta.selected });
     };
     if ($('launch-room')) $('launch-room').onclick = () => online.send({ type: 'start' });
     $('copy-invite').onclick = async () => {
@@ -456,6 +496,76 @@ document.querySelectorAll('[data-mode]').forEach(
 );
 $('start-button').onclick = startGame;
 $('online-button').onclick = () => showOnlineMenu();
+$('hangar-button').onclick = () => showHangar();
+$('ascension-select').onchange = (event) => {
+    selectAscension(meta, Number(event.target.value));
+    commitMeta();
+};
+refreshMetaMenu();
+/** 刷新主菜单上的碎片数量与余烬等级下拉框（只列出已解锁的等级）。 */
+function refreshMetaMenu() {
+    $('hangar-shards').textContent = `余烬碎片 ${meta.shards}`;
+    const select = $('ascension-select');
+    select.innerHTML = Array.from({ length: meta.maxAscension + 1 }, (_, level) =>
+        level === 0
+            ? '<option value="0">标准难度</option>'
+            : `<option value="${level}">等级 ${level} · ${ASCENSION[level - 1].name}</option>`,
+    ).join('');
+    select.value = String(meta.ascension);
+    select.disabled = meta.maxAscension === 0;
+    select.title = meta.maxAscension === 0 ? '从第 1 关打通全部战役即可解锁余烬等级 1' : '';
+}
+/**
+ * 机库界面：选用或解锁底盘、购买永久天赋，并列出余烬等级词条。
+ * 每次购买后重新渲染整个面板，保证按钮状态与碎片余额一致。
+ */
+function showHangar() {
+    const chassisCards = Object.entries(CHASSIS)
+        .map(([id, data]) => {
+            const owned = meta.chassis.includes(id),
+                selected = meta.selected === id;
+            const action = selected
+                ? '<small>使用中</small>'
+                : owned
+                  ? '<small>点击选用</small>'
+                  : `<small>${meta.shards >= data.cost ? '' : '碎片不足 · '}解锁 ${data.cost} 碎片</small>`;
+            return `<button class="hangar-card${selected ? ' selected' : ''}${owned ? '' : ' locked'}" data-chassis="${id}" ${!owned && meta.shards < data.cost ? 'disabled' : ''}><b>${data.name}</b><p>${data.text}</p>${action}</button>`;
+        })
+        .join('');
+    const talentRows = TALENTS.map((talent) => {
+        const level = meta.talents[talent.id] || 0,
+            cost = talentCost(meta, talent.id);
+        const pips = talent.costs.map((_, i) => `<i class="${i < level ? 'on' : ''}"></i>`).join('');
+        return `<div class="talent-row"><div><b>${talent.name}</b><span class="pips">${pips}</span><p>${talent.text}</p></div><button class="secondary-button" data-talent="${talent.id}" ${cost === null || meta.shards < cost ? 'disabled' : ''}>${cost === null ? '已满级' : `升级 · ${cost}`}</button></div>`;
+    }).join('');
+    const ascensionList = ASCENSION.map(
+        (item) =>
+            `<li class="${item.level <= meta.maxAscension ? 'unlocked' : ''}"><b>${item.level}</b> ${item.name} · ${item.text}</li>`,
+    ).join('');
+    showModal(
+        `<h2 id="modal-title">机库</h2><p class="hangar-balance">余烬碎片 <b>${meta.shards}</b> · 累计获得 ${meta.totalShards} · 出击 ${meta.runs} 次</p><h3 class="hangar-heading">战车底盘</h3><div class="hangar-grid">${chassisCards}</div><h3 class="hangar-heading">永久天赋 <span>仅单人 / 同屏双人生效</span></h3><div class="talent-list">${talentRows}</div><h3 class="hangar-heading">余烬等级 <span>从第 1 关打通全部战役解锁下一级 · 每级碎片 +15%</span></h3><ol class="ascension-list">${ascensionList}</ol><button id="hangar-close" class="primary-button">返回</button>`,
+    );
+    layer.querySelectorAll('[data-chassis]').forEach((button) => {
+        button.onclick = () => {
+            const id = button.dataset.chassis;
+            if (meta.chassis.includes(id) ? selectChassis(meta, id) : buyChassis(meta, id)) {
+                sound.play('upgrade');
+                commitMeta();
+                showHangar();
+            }
+        };
+    });
+    layer.querySelectorAll('[data-talent]').forEach((button) => {
+        button.onclick = () => {
+            if (buyTalent(meta, button.dataset.talent)) {
+                sound.play('upgrade');
+                commitMeta();
+                showHangar();
+            }
+        };
+    });
+    $('hangar-close').onclick = hideModal;
+}
 $('room-button').onclick = () => {
     if (online.room?.phase === 'lobby') showLobby(online.room);
     else if (game.state === 'playing') game.pause();

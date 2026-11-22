@@ -94,6 +94,13 @@
                                     <option value="3">虚空裂隙 · 第 19 关</option>
                                 </select></label
                             >
+                            <!-- 余烬等级：难度阶梯，选项由 main.js 按本机已解锁的最高等级生成。 -->
+                            <label class="campaign-select" for="ascension-select"
+                                ><span>余烬等级</span
+                                ><select id="ascension-select">
+                                    <option value="0">标准难度</option>
+                                </select></label
+                            >
                             <div class="mode-switch" role="group" aria-label="选择游玩人数">
                                 <button class="selected" data-mode="1" aria-pressed="true">单人行动</button
                                 ><button data-mode="2" aria-pressed="false">同屏双人</button>
@@ -103,6 +110,8 @@
                                 <svg viewBox="0 0 24 24"><path d="M4 12h15m-6-6 6 6-6 6" /></svg></button
                             ><button id="online-button" class="online-entry">
                                 联机合作 <span>创建 / 加入房间</span></button
+                            ><button id="hangar-button" class="online-entry hangar-entry">
+                                机库 <span id="hangar-shards">余烬碎片 0</span></button
                             ><span class="start-note">24 道关卡 · 4 大战区 · 键鼠 / 触屏</span>
                         </div>
                         <div class="welcome-stamp">

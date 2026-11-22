@@ -593,6 +593,74 @@ export const UPGRADES = [
         },
     },
 ];
+/**
+ * 战车底盘：局外用余烬碎片解锁，开局时套用到玩家基础属性上。联机可用（服务器只接受这里列出的编号）。
+ * mods 中的乘数作用于对应属性，add 为加法；radius 改变车体尺寸（影响碰撞与外观）；drones 为开局自带僚机数。
+ */
+export const CHASSIS = {
+    standard: {
+        name: '轻型突击战车',
+        short: '突击',
+        cost: 0,
+        text: '均衡的标准底盘，没有短板。',
+        mods: {},
+    },
+    heavy: {
+        name: '重炮战车 · 犀牛',
+        short: '重炮',
+        cost: 300,
+        text: '主炮伤害 +45%、装甲 +40，但射速 −26%、移速 −12%。一炮一个坑。',
+        mods: { damage: 1.45, fireRate: 1.35, speed: 0.88, bulletSpeed: 1.1 },
+        add: { maxHp: 40 },
+        radius: 22,
+    },
+    rapid: {
+        name: '速射战车 · 黄蜂',
+        short: '速射',
+        cost: 300,
+        text: '射速 +66%、移速 +10%，但单发伤害 −28%、装甲 −15。弹雨洗地。',
+        mods: { damage: 0.72, fireRate: 0.6, speed: 1.1 },
+        add: { maxHp: -15 },
+        radius: 17,
+    },
+    engineer: {
+        name: '工程战车 · 工蜂',
+        short: '工程',
+        cost: 500,
+        text: '开局自带一架僚机，炮台冷却 −40%、伤害 +50%，主炮伤害 −10%。',
+        mods: { damage: 0.9, supportMax: 0.6, supportDamage: 1.5 },
+        add: { maxHp: 10 },
+        drones: 1,
+    },
+};
+/**
+ * 永久天赋：用余烬碎片逐级购买，costs[i] 为升到第 i+1 级的价格。
+ * 只在单人与同屏双人模式生效；联机房间双方一律使用基础数值，保证公平。
+ */
+export const TALENTS = [
+    { id: 'armor', name: '加固装甲', text: '每级装甲上限 +10。', costs: [150, 300, 450] },
+    { id: 'core', name: '核心稳压', text: '每级核心耐久上限 +40。', costs: [150, 300, 450] },
+    { id: 'reroll', name: '战术备忘录', text: '每级每局改装刷新 +1。', costs: [250, 500] },
+    { id: 'fever', name: '余烬火种', text: '每级开局狂热值 +25%。', costs: [200, 400] },
+    { id: 'weapon', name: '先发特装', text: '每波开局随机获得一件特装武器，持续 6 秒。', costs: [450] },
+    { id: 'salvage', name: '打捞协议', text: '每级结算获得的余烬碎片 +15%。', costs: [300, 600] },
+];
+/**
+ * 余烬等级（难度阶梯）：等级 N 同时启用 1…N 的全部词条。
+ * 从第 1 关开局并打通全部战役，才能解锁下一级；更高等级结算碎片 +15%/级。
+ */
+export const ASCENSION = [
+    { level: 1, name: '坚固敌阵', text: '敌军耐久 +15%。' },
+    { level: 2, name: '精英横行', text: '精英出现概率翻倍。' },
+    { level: 3, name: '急行军', text: '敌军移速 +12%。' },
+    { level: 4, name: '核心过载', text: '清波不再修复核心，阵亡重建消耗 60 核心耐久。' },
+    { level: 5, name: '火力升级', text: '敌军伤害 +20%。' },
+    { level: 6, name: '人海战术', text: '每波敌军数量 +20%。' },
+    { level: 7, name: '补给短缺', text: '特装武器掉率减半。' },
+    { level: 8, name: '巨像觉醒', text: '首领耐久 +30%。' },
+    { level: 9, name: '情报封锁', text: '每局改装刷新 −1。' },
+    { level: 10, name: '余烬终焉', text: '狂热值积攒速度 −30%。' },
+];
 /** 改装图标使用统一描边的 SVG，而不是依赖表情符号字体。 */
 export function iconSvg(kind) {
     const paths = {

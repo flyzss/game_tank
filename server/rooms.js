@@ -1,7 +1,7 @@
 import { randomBytes, randomInt } from 'node:crypto';
 import { Game } from '../js/game.js';
 import { createSnapshot, serializeWalls, sanitizeInput } from '../js/protocol.js';
-import { ZONES } from '../js/config.js';
+import { ZONES, CHASSIS, ASCENSION } from '../js/config.js';
 
 /** 房间管理器独立于 HTTP 层，真实服务器和网络回归测试共用同一套状态机。 */
 export class RoomManager {
@@ -27,8 +27,14 @@ export class RoomManager {
         return {
             code: room.code,
             chapter: room.chapter,
+            ascension: room.ascension || 0,
             phase: room.game?.state || 'lobby',
-            players: room.peers.map((p) => ({ slot: p.slot, connected: !!p.socket, ready: p.ready })),
+            players: room.peers.map((p) => ({
+                slot: p.slot,
+                connected: !!p.socket,
+                ready: p.ready,
+                chassis: p.chassis || 'standard',
+            })),
             votes: room.votes,
             pauseReason: room.pauseReason || '',
         };
@@ -91,6 +97,11 @@ export class RoomManager {
                     0,
                     Math.min(ZONES.length - 1, Number.isInteger(message.chapter) ? message.chapter : 0),
                 ),
+                // 余烬等级由房主创建房间时选择，只校验范围（0–10）；联机不读取任何一方的永久天赋。
+                ascension: Math.max(
+                    0,
+                    Math.min(ASCENSION.length, Number.isInteger(message.ascension) ? message.ascension : 0),
+                ),
                 peers: [],
                 votes: {},
                 events: [],
@@ -133,6 +144,8 @@ export class RoomManager {
         }
         if (type === 'ready' && !room.game) {
             peer.ready = message.ready === true;
+            // 底盘只接受配置表中存在的编号，其余一律按标准底盘处理。
+            if (typeof message.chassis === 'string') peer.chassis = CHASSIS[message.chassis] ? message.chassis : 'standard';
             this.status(room);
             return;
         }
@@ -162,7 +175,11 @@ export class RoomManager {
             );
             // 服务器记录爆裂参数而非粒子本体，随快照下发给客户端本地生成。
             room.game.burstLog = [];
-            room.game.start(2, room.chapter);
+            room.game.start(2, room.chapter, {
+                chassis: room.peers.map((p) => p.chassis || 'standard'),
+                ascension: room.ascension || 0,
+                talents: {},
+            });
             this.status(room);
             this.broadcast(room);
             return;

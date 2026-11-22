@@ -767,6 +767,131 @@ kbd {
     font: 11px var(--display);
     margin-top: 15px;
 }
+/* 机库：碎片余额、底盘卡片、天赋等级点与余烬等级列表。 */
+.hangar-entry {
+    border-color: #b98a4e;
+    color: #f3c98a;
+}
+.hangar-balance b {
+    color: #ffb35c;
+    font: 700 18px var(--display);
+}
+.hangar-heading {
+    margin: 16px 0 8px;
+    font-size: 13px;
+    text-align: left;
+}
+.hangar-heading span {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--muted);
+    margin-left: 8px;
+}
+.hangar-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+}
+.hangar-card {
+    background: #233027;
+    border: 1px solid #53634c;
+    color: var(--ink);
+    text-align: left;
+    padding: 12px;
+}
+.hangar-card b {
+    display: block;
+    font-size: 13px;
+    margin-bottom: 6px;
+}
+.hangar-card p {
+    font-size: 11px;
+    line-height: 1.6;
+    color: #bfccb5;
+    margin: 0 0 8px;
+}
+.hangar-card small {
+    color: var(--orange);
+    font-size: 11px;
+}
+.hangar-card.selected {
+    border-color: var(--orange);
+    background: #303a2b;
+}
+.hangar-card.locked {
+    opacity: 0.85;
+    border-style: dashed;
+}
+.hangar-card:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.talent-list {
+    display: grid;
+    gap: 6px;
+}
+.talent-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--line);
+    padding: 6px 0;
+}
+.talent-row b {
+    font-size: 13px;
+}
+.talent-row p {
+    font-size: 11px;
+    color: #bfccb5;
+    margin: 2px 0 0;
+}
+.talent-row .secondary-button {
+    flex: none;
+    min-width: 96px;
+}
+.pips {
+    margin-left: 8px;
+}
+.pips i {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 3px;
+    border: 1px solid #b98a4e;
+}
+.pips i.on {
+    background: #ffb35c;
+}
+.ascension-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 14px;
+    text-align: left;
+    font-size: 11px;
+    color: var(--muted);
+    display: grid;
+    gap: 3px;
+}
+.ascension-list li.unlocked {
+    color: #ffd0a0;
+}
+.ascension-list b {
+    display: inline-block;
+    width: 20px;
+    font-family: var(--display);
+}
+.result-reward {
+    color: #f3c98a;
+}
+.result-reward b {
+    color: #ffb35c;
+    font: 700 18px var(--display);
+}
+.result-reward span {
+    color: #ff7ad9;
+}
 .result-stats {
     display: flex;
     justify-content: center;

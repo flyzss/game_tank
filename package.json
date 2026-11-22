@@ -1,0 +1,21 @@
+{
+    "name": "emberline",
+    "version": "2.0.0",
+    "private": true,
+    "type": "module",
+    "description": "余烬防线：联机合作与十八关装甲战役",
+    "license": "MIT",
+    "author": "清河县翼程软件开发 (https://hbycrj.com)",
+    "homepage": "https://hbycrj.com/games/tank/",
+    "repository": "github:flyzss/game_tank",
+    "scripts": {
+        "start": "node server/index.js",
+        "test": "node --test tests/*.test.mjs"
+    },
+    "engines": {
+        "node": ">=20"
+    },
+    "dependencies": {
+        "ws": "8.23.0"
+    }
+}

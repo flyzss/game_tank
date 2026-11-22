@@ -3,7 +3,7 @@
 param(
     # Node 只监听回环地址，公网请求由同机 NGINX 转发。
     [ValidateRange(1, 65535)]
-    [int]$Port = 8080,
+    [int]$Port = 8090,
     [ValidateSet('127.0.0.1', '::1')]
     [string]$ListenAddress = '127.0.0.1',
     # 后台任务建议传入完整路径，避免依赖登录账户的 PATH。

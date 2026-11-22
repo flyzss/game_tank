@@ -294,10 +294,21 @@ export const ENEMIES = {
         radius: 43,
     },
 };
+/**
+ * 改装稀有度：决定在三选一中出现的权重与卡面颜色。普通最常见，传说最稀有；
+ * evolution（进化）不参与随机抽取，只在凑齐前置改装后必定出现一次。
+ */
+export const RARITY = {
+    common: { name: '普通', weight: 6, color: '#bfccb5' },
+    rare: { name: '稀有', weight: 3, color: '#7fc8ff' },
+    legendary: { name: '传说', weight: 1, color: '#ffb35c' },
+    evolution: { name: '进化', weight: 0, color: '#ff7ad9' },
+};
 /** 升级池：每波抽取三种不同改装，效果同时作用于所有存活及复活后的玩家。 */
 export const UPGRADES = [
     {
         id: 'sentry',
+        rarity: 'common',
         name: '自动哨戒系统',
         text: '炮台伤害提高 40%，部署冷却缩短 20%。',
         icon: 'core',
@@ -308,6 +319,7 @@ export const UPGRADES = [
     },
     {
         id: 'regen',
+        rarity: 'common',
         name: '纳米修复层',
         text: '持续修复每秒 1.5 装甲，积少成多。',
         icon: 'shield',
@@ -318,6 +330,7 @@ export const UPGRADES = [
     },
     {
         id: 'battery',
+        rarity: 'common',
         name: '战术能量回路',
         text: '冲刺与震荡冷却各缩短 15%，维修拾取额外恢复 10 装甲。',
         icon: 'rapid',
@@ -329,6 +342,7 @@ export const UPGRADES = [
     },
     {
         id: 'damage',
+        rarity: 'common',
         name: '钨芯穿甲弹',
         text: '主炮伤害提高 30%，正面击穿重装防线。',
         icon: 'shell',
@@ -338,6 +352,7 @@ export const UPGRADES = [
     },
     {
         id: 'rapid',
+        rarity: 'common',
         name: '高速装填机',
         text: '主炮射速提高 22%，持续压制来袭敌军。',
         icon: 'rapid',
@@ -347,6 +362,7 @@ export const UPGRADES = [
     },
     {
         id: 'spread',
+        rarity: 'rare',
         name: '双联散射炮',
         text: '额外发射一枚散射弹，扩大火力覆盖。',
         icon: 'spread',
@@ -357,6 +373,7 @@ export const UPGRADES = [
     },
     {
         id: 'armor',
+        rarity: 'common',
         name: '复合反应装甲',
         text: '装甲上限增加 35，立即修复全部装甲。',
         icon: 'shield',
@@ -367,6 +384,7 @@ export const UPGRADES = [
     },
     {
         id: 'speed',
+        rarity: 'common',
         name: '超频涡轮',
         text: '移动速度提高 15%，冲刺冷却缩短 15%。',
         icon: 'speed',
@@ -377,6 +395,7 @@ export const UPGRADES = [
     },
     {
         id: 'nova',
+        rarity: 'rare',
         name: '震荡放大器',
         text: '震荡伤害提高 45%，冷却缩短 20%。',
         icon: 'nova',
@@ -387,6 +406,7 @@ export const UPGRADES = [
     },
     {
         id: 'repair',
+        rarity: 'common',
         name: '核心修复协议',
         text: '修复核心 30% 耐久，同时全员恢复装甲。',
         icon: 'core',
@@ -396,6 +416,7 @@ export const UPGRADES = [
     },
     {
         id: 'pierce',
+        rarity: 'rare',
         name: '贯穿弹头',
         text: '炮弹额外穿透一个目标，弹速提高 10%。',
         icon: 'shell',
@@ -408,6 +429,7 @@ export const UPGRADES = [
     {
         // 跳弹：命中掩体后反弹一次而不是消失，可以打到掩体后面的敌人。
         id: 'ricochet',
+        rarity: 'rare',
         name: '跳弹偏转器',
         text: '炮弹撞墙后反弹一次，绕过掩体打击敌人。',
         icon: 'spread',
@@ -419,6 +441,7 @@ export const UPGRADES = [
     {
         // 吸能：每次击毁敌军，全体存活队员回复少量装甲，鼓励主动进攻。
         id: 'vampire',
+        rarity: 'rare',
         name: '残骸吸能装置',
         text: '每击毁一辆敌军，全员回复 4 点装甲。',
         icon: 'shield',
@@ -430,6 +453,7 @@ export const UPGRADES = [
     {
         // 殉爆：被击毁的敌军原地爆炸，波及周围敌军，可触发连锁反应。
         id: 'chain',
+        rarity: 'legendary',
         name: '殉爆诱导弹',
         text: '敌军被击毁时发生殉爆，对周围敌军造成 45 伤害。',
         icon: 'nova',
@@ -441,6 +465,7 @@ export const UPGRADES = [
     {
         // 高爆弹头：主炮命中敌军时额外爆炸，按命中伤害比例波及周围敌军，叠加两次后清群极快。
         id: 'explosive',
+        rarity: 'rare',
         name: '高爆弹头',
         text: '炮弹命中时爆炸，对周围敌军造成 40% 溅射伤害。',
         icon: 'nova',
@@ -452,6 +477,7 @@ export const UPGRADES = [
     {
         // 致命校准：每发炮弹独立判定暴击，暴击伤害 ×2.5 并显示醒目的暴击数字。
         id: 'crit',
+        rarity: 'rare',
         name: '致命校准',
         text: '炮弹有 18% 概率暴击，造成 2.5 倍伤害。',
         icon: 'shell',
@@ -463,6 +489,7 @@ export const UPGRADES = [
     {
         // 僚机无人机：围绕战车旋转的小型无人机，自动射击最近的敌军。
         id: 'drone',
+        rarity: 'legendary',
         name: '僚机无人机',
         text: '获得一架环绕战车的僚机，自动射击附近敌军。',
         icon: 'core',
@@ -474,6 +501,7 @@ export const UPGRADES = [
     {
         // 狂热回路：击杀积攒狂热值更快，狂热模式持续时间更长。
         id: 'fever',
+        rarity: 'rare',
         name: '狂热回路',
         text: '狂热值积攒速度 +40%，狂热模式持续 +3 秒。',
         icon: 'rapid',
@@ -486,6 +514,7 @@ export const UPGRADES = [
     {
         // 磁吸回收：扩大掉落物吸附范围，特装武器持续时间延长。
         id: 'magnet',
+        rarity: 'rare',
         name: '磁吸回收臂',
         text: '拾取范围翻倍，特装武器持续时间 +40%。',
         icon: 'speed',
@@ -493,6 +522,74 @@ export const UPGRADES = [
         apply: (p) => {
             p.magnet = 2;
             p.weaponBonus += 0.4;
+        },
+    },
+    // ---- 进化卡：requires 中的改装全部到手后，下一次清波必定出现在候选首位，每局各一次 ----
+    {
+        // 弹球炸弹：跳弹 + 高爆。每次撞墙反弹都会引爆，并额外获得两次反弹，适合在掩体间打出连环爆。
+        id: 'pinball',
+        rarity: 'evolution',
+        requires: ['ricochet', 'explosive'],
+        name: '弹球炸弹',
+        text: '炮弹每次撞墙反弹都会爆炸，反弹次数 +2。',
+        icon: 'nova',
+        max: 1,
+        apply: (p) => {
+            p.pinball = true;
+            p.bounce += 2;
+        },
+    },
+    {
+        // 雷霆僚机：僚机 + 致命校准。僚机射速翻倍，每发僚机弹命中后都会连锁闪电。
+        id: 'thunderWing',
+        rarity: 'evolution',
+        requires: ['drone', 'crit'],
+        name: '雷霆僚机',
+        text: '僚机射速翻倍，僚机弹命中后连锁闪电跳向两个敌人。',
+        icon: 'rapid',
+        max: 1,
+        apply: (p) => {
+            p.thunderWing = true;
+        },
+    },
+    {
+        // 血色连爆：殉爆 + 吸能。殉爆范围 ×1.5、伤害 ×2，每次击毁额外回复 4 装甲。
+        id: 'bloodChain',
+        rarity: 'evolution',
+        requires: ['chain', 'vampire'],
+        name: '血色连爆',
+        text: '殉爆范围 ×1.5、伤害 ×2，击毁回复再 +4 装甲。',
+        icon: 'shield',
+        max: 1,
+        apply: (p) => {
+            p.chainPower = 2;
+            p.lifesteal += 4;
+        },
+    },
+    {
+        // 激光哨塔：哨戒系统 + 贯穿弹头。炮台改射无限穿透激光，射速提高，持续时间延长到 18 秒。
+        id: 'laserSentry',
+        rarity: 'evolution',
+        requires: ['sentry', 'pierce'],
+        name: '激光哨塔',
+        text: '炮台改为发射无限穿透的激光，射速提高 70%，持续 18 秒。',
+        icon: 'core',
+        max: 1,
+        apply: (p) => {
+            p.laserSentry = true;
+        },
+    },
+    {
+        // 永动狂热：狂热回路 + 磁吸回收臂。狂热期间每次击毁延长 0.25 秒狂热（总时长上限 20 秒）。
+        id: 'eternalFever',
+        rarity: 'evolution',
+        requires: ['fever', 'magnet'],
+        name: '永动狂热',
+        text: '狂热期间每次击毁延长 0.25 秒狂热，连杀不断，狂热不止。',
+        icon: 'rapid',
+        max: 1,
+        apply: (p) => {
+            p.eternalFever = true;
         },
     },
 ];

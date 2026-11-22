@@ -668,6 +668,99 @@ kbd {
     color: #bfccb5;
     margin: 0;
 }
+/* 改装稀有度：普通保持原样，稀有为冷蓝，传说为琥珀金，进化为品红并带缓慢呼吸光。 */
+.upgrade-option {
+    position: relative;
+}
+.rarity-tag {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    font: 700 10px var(--display);
+    font-style: normal;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+}
+.upgrade-option.rarity-rare {
+    border-color: #4f7c9c;
+}
+.upgrade-option.rarity-rare .rarity-tag,
+.upgrade-option.rarity-rare svg {
+    color: #7fc8ff;
+}
+.upgrade-option.rarity-legendary {
+    border-color: #b9823e;
+    background: #30301f;
+}
+.upgrade-option.rarity-legendary .rarity-tag,
+.upgrade-option.rarity-legendary svg {
+    color: #ffb35c;
+}
+.upgrade-option.rarity-evolution {
+    border-color: #ff7ad9;
+    background: #36222f;
+    animation: evolution-glow 1.6s ease-in-out infinite;
+}
+.upgrade-option.rarity-evolution .rarity-tag,
+.upgrade-option.rarity-evolution svg {
+    color: #ff7ad9;
+}
+.upgrade-option em {
+    display: block;
+    font-style: normal;
+    font-size: 11px;
+    color: #ffb0e8;
+    margin: -4px 0 8px;
+}
+@keyframes evolution-glow {
+    50% {
+        box-shadow: 0 0 22px #ff7ad955;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .upgrade-option.rarity-evolution {
+        animation: none;
+    }
+}
+.evolution-hint {
+    color: #ff7ad9;
+    margin: 0 2px;
+}
+.reroll-button {
+    margin-top: 14px;
+}
+.reroll-button span {
+    font: 11px var(--display);
+    margin-left: 6px;
+    color: var(--muted);
+}
+/* 波次评级：大号字母配一行统计说明，S 级用品红、A 级用琥珀、B 级用绿色、C 级保持灰色。 */
+.wave-grade {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin: 4px 0 6px;
+}
+.wave-grade b {
+    font: 700 40px var(--display);
+    line-height: 1;
+    color: var(--muted);
+}
+.wave-grade span {
+    font-size: 12px;
+    color: #bfccb5;
+}
+.wave-grade.grade-s b {
+    color: #ff7ad9;
+    text-shadow: 0 0 18px #ff7ad977;
+}
+.wave-grade.grade-a b {
+    color: #ffb35c;
+}
+.wave-grade.grade-b b {
+    color: #b6d2a0;
+}
 .upgrade-option small {
     display: block;
     color: var(--orange);

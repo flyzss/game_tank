@@ -264,6 +264,17 @@ export class Renderer {
                 c.beginPath();
                 c.arc(p.x, p.y, p.size * (3 - p.life / p.maxLife), 0, Math.PI * 2);
                 c.fill();
+            } else if (p.debris) {
+                // 残骸碎片：按自旋速度旋转的实心方块，外加深色描边，在爆炸火光中依然看得清轮廓。
+                c.save();
+                c.translate(p.x, p.y);
+                c.rotate((p.spin || 0) * (p.maxLife - p.life));
+                c.fillStyle = p.color;
+                c.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.7);
+                c.strokeStyle = '#14201a';
+                c.lineWidth = 1;
+                c.strokeRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.7);
+                c.restore();
             } else {
                 c.save();
                 c.translate(p.x, p.y);
@@ -322,6 +333,13 @@ export class Renderer {
             c.textAlign = 'left';
         }
         this.drawFever(c, g, time);
+        // 首领终结慢动作：上下电影黑边随剩余时间收起，强调「时间停顿」的一刻。
+        if ((g.slowmo || 0) > 0) {
+            const bar = 60 * clamp(g.slowmo / 0.9, 0, 1);
+            c.fillStyle = '#05080acc';
+            c.fillRect(0, 0, 1280, bar);
+            c.fillRect(0, 800 - bar, 1280, bar);
+        }
         this.drawAnnounce(c, g.announce);
         const boss = g.enemies.find((e) => e.boss && !e.dead);
         if (boss) this.drawBossBar(c, boss);
@@ -573,13 +591,14 @@ export class Renderer {
         c.rotate(t.angle);
         c.fillStyle = '#c5d3a2';
         c.fillRect(-7, -8, 19, 16);
-        c.fillStyle = '#78916c';
+        // 激光哨塔进化后炮管换成青色，与普通哨戒炮一眼区分。
+        c.fillStyle = t.laser ? '#7ff0ff' : '#78916c';
         c.fillRect(8 - t.recoil * 0.3, -4, 28, 8);
         c.fillStyle = '#16291e';
         c.fillRect(33 - t.recoil * 0.3, -5, 5, 10);
         c.restore();
         c.fillStyle = '#8caa78';
-        c.fillRect(t.x - 15, t.y + 24, 30 * Math.max(0, t.life / 12), 2);
+        c.fillRect(t.x - 15, t.y + 24, 30 * Math.max(0, t.life / (t.laser ? 18 : 12)), 2);
     }
     /** 废墟混凝土有顶面、倒角与右下投影，损坏后裂纹加深，钢墙保留独立材质。 */
     drawWall(c, w) {

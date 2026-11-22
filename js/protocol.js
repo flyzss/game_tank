@@ -87,6 +87,10 @@ export function createSnapshot(game, options = {}) {
         'feverTime',
         'streak',
         'announce',
+        // 改装刷新次数、上一波评级与首领终结慢动作。
+        'rerolls',
+        'lastGrade',
+        'slowmo',
         'upgrades',
         'spawned',
         'best',

@@ -1,4 +1,4 @@
-import { WORLD, WAVES, ENEMIES, UPGRADES, FIELD_EVENTS, ZONES, MAX_ENEMIES, WEAPONS, AFFIXES } from './config.js';
+import { WORLD, WAVES, ENEMIES, UPGRADES, FIELD_EVENTS, ZONES, MAX_ENEMIES, WEAPONS, AFFIXES, RARITY } from './config.js';
 
 /** 数值工具集中定义，碰撞和距离始终使用逻辑战场坐标而非屏幕像素。 */
 export const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -68,6 +68,14 @@ export class Game {
         this.streak = 0;
         this.streakTimer = 0;
         this.announce = null;
+        // 每局 2 次改装刷新；S 级评价额外奖励 1 次。
+        this.rerolls = 2;
+        // 首领终结慢动作剩余秒数（真实时间），期间模拟按 30% 速度推进。
+        this.slowmo = 0;
+        // 波次评级统计：本波承受的总伤害（玩家装甲 + 核心）与最高连击；lastGrade 为上一波的评级结果。
+        this.waveDamage = 0;
+        this.waveMaxCombo = 0;
+        this.lastGrade = null;
         this.zone = 0;
         this.controls.clear();
         this.upgrades = [];
@@ -147,6 +155,12 @@ export class Game {
             // 当前特装武器（WEAPONS 的键，空字符串表示无）及剩余秒数。
             weapon: '',
             weaponTime: 0,
+            // 进化卡开关：弹球炸弹、雷霆僚机、殉爆强度倍率、激光哨塔、永动狂热。
+            pinball: false,
+            thunderWing: false,
+            chainPower: 1,
+            laserSentry: false,
+            eternalFever: false,
         };
     }
     /** 生成手工布置的掩体群：主通道保持畅通，混凝土可破坏，钢墙用于稳定战场结构。 */
@@ -263,6 +277,8 @@ export class Game {
         }
         this.spawned = 0;
         this.spawnTimer = 2.5;
+        this.waveDamage = 0;
+        this.waveMaxCombo = 0;
         this.waveDelay = 0;
         this.hazards = [];
         this.turrets = [];
@@ -486,15 +502,19 @@ export class Game {
         this.shake = 45;
         this.flashScreen(0.95, 0.3);
         this.sound.play('nuke', { x: p.x });
-        this.announceText('核爆清场！', 'TACTICAL NUKE', '#ff8a6b');
+        this.announceText('核爆清场！', 'TACTICAL NUKE', '#ff8a6b', 2);
         const damage = 400 + this.wave * 15;
         for (const enemy of [...this.enemies])
             if (!enemy.dead && enemy.warning <= 0) this.damageEnemy(enemy, damage, true, angleTo(p, enemy));
         for (const barrel of this.barrels) if (!barrel.dead) this.detonateBarrel(barrel);
     }
-    /** 屏幕中央的大字播报，用于连杀、狂热与核弹；新播报直接覆盖旧播报。 */
-    announceText(text, sub, color = '#ffd36e') {
-        this.announce = { text, sub, color, life: 1.6, maxLife: 1.6 };
+    /**
+     * 屏幕中央的大字播报。参数 priority 为优先级：连杀 0、狂热与首领阶段 1、核弹与首领终结 2。
+     * 当前播报仍在显示且优先级更高时，新的低优先级播报被丢弃，避免高光时刻被连杀刷掉。
+     */
+    announceText(text, sub, color = '#ffd36e', priority = 0) {
+        if (this.announce && this.announce.life > 0 && (this.announce.priority || 0) > priority) return;
+        this.announce = { text, sub, color, life: 1.6, maxLife: 1.6, priority };
     }
     /**
      * 通用爆炸结算：对半径内敌军造成范围伤害（不受盾卫护盾影响），可选波及玩家与混凝土掩体，并引爆附近油桶。
@@ -548,7 +568,7 @@ export class Game {
         this.feverTime = 8 + (this.players[0]?.feverBonus || 0);
         this.sound.play('fever');
         this.flashScreen(0.5, 0.14);
-        this.announceText('狂热模式！', 'FEVER · 射速翻倍 · 伤害 +35% · 受伤减半', '#ff7ad9');
+        this.announceText('狂热模式！', 'FEVER · 射速翻倍 · 伤害 +35% · 受伤减半', '#ff7ad9', 1);
         this.players.forEach((p) => {
             if (p.hp > 0) this.rings.push({ x: p.x, y: p.y, radius: 10, max: 160, life: 0.6, maxLife: 0.6, color: '#ff7ad9', fill: true });
         });
@@ -559,6 +579,12 @@ export class Game {
             if (this.state === 'menu') this.updateEffects(dt);
             this.sound.update(false, 0);
             return;
+        }
+        // 首领终结慢动作：按真实时间倒计时，期间战斗以 30% 速度推进，镜头与火光仍按真实时间播放。
+        if (this.slowmo > 0) {
+            this.slowmo -= dt;
+            this.updateEffects(dt * 0.7);
+            dt *= 0.3;
         }
         if (this.hitstop > 0) {
             this.hitstop -= dt;
@@ -686,11 +712,16 @@ export class Game {
         if (p.drones <= 0 || p.droneCd > 0) return;
         const target = this.nearestEnemy(p);
         if (!target || distance(target, p) > 480) return;
-        p.droneCd = 0.38;
+        // 雷霆僚机：射速翻倍，僚机弹附带两跳连锁闪电。
+        p.droneCd = p.thunderWing ? 0.19 : 0.38;
         for (let i = 0; i < p.drones; i++) {
             const orbit = this.time * 3 + (i * Math.PI * 2) / p.drones;
             const origin = { x: p.x + Math.cos(orbit) * 34, y: p.y + Math.sin(orbit) * 34, radius: 2, pierce: 0, bounce: 0 };
-            this.createBullet(origin, angleTo(origin, target), false, 820, p.damage * 0.45, { kind: 'drone' });
+            this.createBullet(origin, angleTo(origin, target), false, 820, p.damage * 0.45, {
+                kind: p.thunderWing ? 'spark' : 'drone',
+                arc: p.thunderWing,
+                arcJumps: 2,
+            });
         }
     }
     /**
@@ -775,7 +806,9 @@ export class Game {
             pierce: 0,
             multishot: 0,
             fireCd: 0,
-            life: 12,
+            // 激光哨塔进化：持续 18 秒并改射穿透激光。
+            life: p.laserSentry ? 18 : 12,
+            laser: p.laserSentry,
             recoil: 0,
         });
         if (this.turrets.length > 4) this.turrets.shift();
@@ -843,7 +876,7 @@ export class Game {
                     if (!barrel.dead && distance(barrel, hazard) < hazard.radius) this.detonateBarrel(barrel);
                 });
                 if (hazard.enemy && distance(this.core, hazard) < hazard.radius)
-                    this.core.hp = Math.max(0, this.core.hp - hazard.damage * 0.5);
+                    this.hurtCore(hazard.damage * 0.5);
             }
         }
         this.hazards = this.hazards.filter((h) => h.life > 0);
@@ -870,8 +903,12 @@ export class Game {
             const target = this.nearestEnemy(turret);
             if (target && distance(target, turret) < 450 && turret.fireCd <= 0) {
                 turret.angle = angleTo(turret, target);
-                this.fire(turret, false);
-                turret.fireCd = 0.42;
+                if (turret.laser) {
+                    this.createBullet(turret, turret.angle, false, 1300, turret.damage * 1.2, { kind: 'laser', pierce: 99 });
+                    turret.recoil = 8;
+                    this.sound.play('shoot', { x: turret.x, strength: 0.5 });
+                } else this.fire(turret, false);
+                turret.fireCd = turret.laser ? 0.25 : 0.42;
             }
         }
         this.turrets = this.turrets.filter((t) => t.life > 0);
@@ -892,7 +929,7 @@ export class Game {
                     if (p.hp > 0 && segmentCircle(beam.x, beam.y, x2, y2, p, p.radius + 6)) this.damagePlayer(p, beam.damage);
                 });
                 if (segmentCircle(beam.x, beam.y, x2, y2, this.core, this.core.radius))
-                    this.core.hp = Math.max(0, this.core.hp - beam.damage * 0.6);
+                    this.hurtCore(beam.damage * 0.6);
                 this.impact('hit', x2, y2, beam.angle + Math.PI, 1.3);
                 this.sound.play('laser', { x: beam.x });
             }
@@ -1034,7 +1071,7 @@ export class Game {
             const small = Boolean(e.drone);
             this.impact('explosion', e.x, e.y, 0, small ? 0.5 : 1.1);
             this.shake = Math.max(this.shake, small ? 6 : 16);
-            if (target === this.core) this.core.hp = Math.max(0, this.core.hp - e.damage);
+            if (target === this.core) this.hurtCore(e.damage);
             this.players.forEach((p) => {
                 if (distance(p, e) < (small ? 55 : 100)) this.damagePlayer(p, e.damage);
             });
@@ -1047,7 +1084,7 @@ export class Game {
             if (phase > (e.phase || 0)) {
                 e.phase = phase;
                 this.spawnSwarm(e.x, e.y + e.radius + 30, 6);
-                this.announceText(phase === 1 ? '首领进入二阶段' : '首领狂暴！', e.name + ' 召唤了蜂群护卫', '#ff9a6a');
+                this.announceText(phase === 1 ? '首领进入二阶段' : '首领狂暴！', e.name + ' 召唤了蜂群护卫', '#ff9a6a', 1);
                 this.sound.play('nova');
             }
         }
@@ -1320,7 +1357,7 @@ export class Game {
      */
     shotTraits(entity) {
         const crit = Math.random() < (entity.crit || 0);
-        return { crit, explosive: entity.explosive || 0, damageScale: crit ? 2.5 : 1 };
+        return { crit, explosive: entity.explosive || 0, damageScale: crit ? 2.5 : 1, pinball: Boolean(entity.pinball) };
     }
     /**
      * 特装武器的单发炮弹：激光高速无限穿透，闪电命中后跳向附近敌人，其余武器沿用普通弹并保留改装效果。
@@ -1366,6 +1403,8 @@ export class Game {
                 // 跳弹：退回上一帧位置，按撞击面翻转速度分量；上一帧在墙体左右侧则水平反弹，否则垂直反弹。
                 // 追踪飞弹撞墙也会爆炸，照样能炸到墙后的敌人。
                 if (b.kind === 'rocket') this.explode(b.x, b.y, 70, b.damage * 0.7, { walls: 40, scale: 0.6 });
+                // 弹球炸弹：每次撞墙都在撞击点爆炸。
+                else if (b.pinball) this.explode(b.x, b.y, 70, b.damage * 0.8, { scale: 0.6, color: '#ff9a5a' });
                 if (b.bounce > 0) {
                     b.bounce--;
                     b.dead = false;
@@ -1401,7 +1440,7 @@ export class Game {
                 if (segmentCircle(ox, oy, b.x, b.y, this.core, this.core.radius + b.radius)) {
                     b.dead = true;
                     if (this.core.hit <= 0) {
-                        this.core.hp = Math.max(0, this.core.hp - b.damage);
+                        this.hurtCore(b.damage);
                         this.core.hit = 0.14;
                         this.shake = 7;
                         this.sound.play('hurt');
@@ -1451,7 +1490,7 @@ export class Game {
             this.sound.play('explode', { x: b.x, strength: 0.55 });
         }
         if (b.explosive > 0) this.explode(b.x, b.y, 58, b.damage * b.explosive, { skip: enemy, scale: 0.4, color: '#ffd27a' });
-        if (b.arc) this.chainLightning(enemy, b.damage * 0.6, 3);
+        if (b.arc) this.chainLightning(enemy, b.damage * 0.6, b.arcJumps || 3);
     }
     /**
      * 连锁闪电：从 source 出发依次跳向 170 像素内最近的未命中敌人，最多 jumps 次，每跳伤害为 damage。
@@ -1502,6 +1541,11 @@ export class Game {
         }
         return true;
     }
+    /** 核心受伤统一入口：扣除耐久并计入本波承伤，供波次评级使用。参数 amount 为伤害值。 */
+    hurtCore(amount) {
+        this.core.hp = Math.max(0, this.core.hp - amount);
+        this.waveDamage += amount;
+    }
     /** 装甲命中带短暂无敌，避免一帧内叠加多发炮弹造成不可读的瞬间死亡。 */
     damagePlayer(p, amount) {
         if (p.invincible > 0 || p.hp <= 0) return;
@@ -1518,6 +1562,7 @@ export class Game {
             if (amount <= 0) return;
         }
         p.hp = Math.max(0, p.hp - amount);
+        this.waveDamage += amount;
         p.hit = 0.18;
         p.invincible = 0.45;
         this.shake = 8;
@@ -1586,7 +1631,16 @@ export class Game {
             // 连击不再封顶，积分倍率每连击 +5%，最高 ×5；连击窗口 3.5 秒。
             this.combo = Math.min(999, this.combo + 1);
             this.comboTime = 3.5;
+            this.waveMaxCombo = Math.max(this.waveMaxCombo, this.combo);
             this.score += Math.round(enemy.score * Math.min(5, 1 + (this.combo - 1) * 0.05));
+            // 击杀音阶：每次击毁按连击数在五声音阶上升一级，连杀时像在弹琴。
+            this.sound.play('killnote', { step: this.combo });
+            // 残骸碎片：按敌人颜色四溅的大块碎片，由客户端按爆裂参数本地生成，不占快照体积。
+            this.burst(enemy.x, enemy.y, enemy.color, enemy.boss ? 40 : enemy.drone ? 4 : 10, enemy.boss ? 320 : 220, 'debris');
+            if (enemy.boss) {
+                this.slowmo = 0.9;
+                this.announceText('终结！', `${enemy.name} 已被击毁`, '#ffd36e', 2);
+            }
             this.shake = Math.max(this.shake, enemy.boss ? 40 : enemy.drone ? 10 : 22);
             // 击毁停顿只在冷却结束时触发（首领例外），清屏时依然流畅。
             if (enemy.boss) this.hitstop = 0.16;
@@ -1671,11 +1725,16 @@ export class Game {
         const lifesteal = this.players[0]?.lifesteal || 0;
         if (lifesteal > 0) alive.forEach((p) => (p.hp = Math.min(p.maxHp, p.hp + lifesteal)));
         if (this.players.some((p) => p.chain)) {
-            this.rings.push({ x: enemy.x, y: enemy.y, radius: 10, max: 85, life: 0.35, maxLife: 0.35, color: '#ffb46b' });
+            // 血色连爆进化：范围 ×1.5、伤害 ×2，并换成暗红色冲击环。
+            const power = this.players[0]?.chainPower || 1,
+                radius = power > 1 ? 128 : 85;
+            this.rings.push({ x: enemy.x, y: enemy.y, radius: 10, max: radius, life: 0.35, maxLife: 0.35, color: power > 1 ? '#ff5a6a' : '#ffb46b' });
             for (const other of this.enemies)
-                if (other !== enemy && !other.dead && distance(other, enemy) < 85 + other.radius)
-                    this.damageEnemy(other, 45, true, angleTo(enemy, other));
+                if (other !== enemy && !other.dead && distance(other, enemy) < radius + other.radius)
+                    this.damageEnemy(other, 45 * power, true, angleTo(enemy, other));
         }
+        // 永动狂热进化：狂热期间每次击毁延长 0.25 秒，总时长不超过 20 秒。
+        if (this.feverTime > 0 && this.players[0]?.eternalFever) this.feverTime = Math.min(20, this.feverTime + 0.25);
         // 连击超频：连击达到 5 以及每满 10 时，全员获得 4 秒超频射速，奖励连续击破。
         if (this.combo === 5 || this.combo % 10 === 0) {
             alive.forEach((p) => (p.overdrive = Math.max(p.overdrive, 4)));
@@ -1744,10 +1803,10 @@ export class Game {
         this.pickups = this.pickups.filter((p) => p.life > 0);
     }
     /** 粒子有固定上限；爆炸采用少量高对比火星与慢速烟尘避免过度遮挡。 */
-    burst(x, y, color, count, speed) {
+    burst(x, y, color, count, speed, kind = '') {
         // 联机服务器不广播粒子数组（曾占快照体积的七成），只记录生成参数，由客户端本地复现火花。
         if (this.burstLog) {
-            this.burstLog.push([Math.round(x), Math.round(y), color, count, speed]);
+            this.burstLog.push(kind ? [Math.round(x), Math.round(y), color, count, speed, kind] : [Math.round(x), Math.round(y), color, count, speed]);
             if (this.burstLog.length > 120) this.burstLog.shift();
         }
         // 手机等触屏设备由界面层把 particleScale 设为 0.5，火花减半以保持帧率；规则不受影响。
@@ -1767,6 +1826,15 @@ export class Game {
                 size: random(1.2, 4),
                 smoke: i % 5 === 0,
             });
+            // 碎片：更大、更慢消散、带自旋的方块，覆盖默认火星外观。
+            if (kind === 'debris') {
+                const debris = this.particles[this.particles.length - 1];
+                debris.debris = true;
+                debris.smoke = false;
+                debris.size = random(3, 7);
+                debris.life = debris.maxLife = random(0.6, 1.2);
+                debris.spin = random(-12, 12);
+            }
         }
         if (this.particles.length > 750) this.particles.splice(0, this.particles.length - 750);
     }
@@ -1858,15 +1926,53 @@ export class Game {
             p.novaCd = 0;
             p.supportCd = 0;
         });
-        const available = UPGRADES.filter(
-            (u) => !u.max || this.upgrades.filter((id) => id === u.id).length < u.max,
-        );
-        this.choices = available
-            .map((u) => ({ u, sort: Math.random() }))
-            .sort((a, b) => a.sort - b.sort)
-            .slice(0, 3)
-            .map((item) => item.u);
+        this.gradeWave();
+        this.choices = this.drawChoices();
         this.sound.play('upgrade');
+        this.onEvent('upgrade', this.choices);
+    }
+    /**
+     * 波次评级：评分 = 100 − 本波承伤 × 0.6 + 本波最高连击（最多计 40）。
+     * S ≥ 115：+1500 积分并额外获得 1 次刷新；A ≥ 95：+800；B ≥ 70：+300；其余为 C。
+     * 结果保存在 lastGrade，供改装界面展示。
+     */
+    gradeWave() {
+        const points = 100 - this.waveDamage * 0.6 + Math.min(40, this.waveMaxCombo);
+        const grade = points >= 115 ? 'S' : points >= 95 ? 'A' : points >= 70 ? 'B' : 'C';
+        const bonus = { S: 1500, A: 800, B: 300, C: 0 }[grade];
+        this.score += bonus;
+        if (grade === 'S') this.rerolls++;
+        this.lastGrade = { grade, bonus, damage: Math.round(this.waveDamage), combo: this.waveMaxCombo };
+    }
+    /**
+     * 抽取三张改装候选：
+     * 1. 若存在「前置已凑齐、尚未获得」的进化卡，必定放在首位（每次只放一张）；
+     * 2. 其余按稀有度权重（普通 6、稀有 3、传说 1）不放回加权抽取，已达上限的改装不再出现。
+     */
+    drawChoices() {
+        const owned = (id) => this.upgrades.filter((item) => item === id).length;
+        const choices = [];
+        const evolution = UPGRADES.find(
+            (u) => u.requires && !owned(u.id) && u.requires.every((id) => owned(id) > 0),
+        );
+        if (evolution) choices.push(evolution);
+        const pool = UPGRADES.filter((u) => !u.requires && (!u.max || owned(u.id) < u.max));
+        while (choices.length < 3 && pool.length) {
+            const total = pool.reduce((sum, u) => sum + (RARITY[u.rarity]?.weight || 1), 0);
+            let roll = Math.random() * total,
+                index = 0;
+            while (index < pool.length - 1 && (roll -= RARITY[pool[index].rarity]?.weight || 1) > 0) index++;
+            choices.push(pool.splice(index, 1)[0]);
+        }
+        return choices;
+    }
+    /** 消耗一次刷新，重新抽取改装候选（进化卡保底规则不变）；联机时由服务器执行并重置双方投票。 */
+    rerollUpgrade() {
+        if (this.commandSender) return this.commandSender('reroll');
+        if (this.state !== 'upgrade' || this.rerolls <= 0) return;
+        this.rerolls--;
+        this.choices = this.drawChoices();
+        this.sound.play('powerup');
         this.onEvent('upgrade', this.choices);
     }
     /** 改装只允许从当前候选中选择一次，防止重复点击叠加多次升级。 */

@@ -188,6 +188,8 @@ export class RoomManager {
             game.resume();
             this.status(room);
         }
+        // 任一指挥官都可消耗全队共享的刷新次数；刷新会通过 upgrade 事件重置双方投票。
+        if (type === 'reroll') game.rerollUpgrade();
         if (type === 'vote' && game.state === 'upgrade' && game.choices.some((u) => u.id === message.id)) {
             room.votes[peer.slot] = message.id;
             this.status(room);

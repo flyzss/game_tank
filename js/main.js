@@ -3,7 +3,7 @@ import { OnlineSession } from './network.js';
 import { appUrl } from './paths.js';
 import { Renderer } from './renderer.js';
 import { SoundDirector } from './sound.js';
-import { WAVES, UPGRADES, ZONES, FIELD_EVENTS, iconSvg } from './config.js';
+import { WAVES, UPGRADES, ZONES, FIELD_EVENTS, RARITY, iconSvg } from './config.js';
 
 /** 应用入口只负责输入与界面，战斗规则和绘图分别在独立模块内。 */
 const $ = (id) => document.getElementById(id);
@@ -153,13 +153,30 @@ function closeHelp() {
         });
 }
 /** 三选一使用真实按钮；数字键 1–3 也可快速选择。 */
+/**
+ * 改装三选一界面：顶部显示上一波评级（S/A/B/C 与奖励），卡片按稀有度着色；
+ * 进化卡额外标注由哪两张改装合成；底部的刷新按钮消耗全队共享的刷新次数（快捷键 R）。
+ * 参数 choices 为当前候选改装数组。
+ */
 function showUpgrades(choices) {
+    const grade = game.lastGrade;
+    const gradeLine = grade
+        ? `<div class="wave-grade grade-${grade.grade.toLowerCase()}"><b>${grade.grade}</b><span>本波评级 · 承伤 ${grade.damage} · 最高连击 ${grade.combo}${grade.bonus ? ` · 奖励 +${grade.bonus} 积分` : ''}${grade.grade === 'S' ? ' · 额外刷新 +1' : ''}</span></div>`
+        : '';
+    const card = (u, i) => {
+        const rarity = RARITY[u.rarity] || RARITY.common;
+        const recipe = u.requires
+            ? `<em>${u.requires.map((id) => UPGRADES.find((item) => item.id === id)?.name).join(' + ')}</em>`
+            : '';
+        return `<button class="upgrade-option rarity-${u.rarity || 'common'}" data-upgrade="${u.id}"><i class="rarity-tag">${rarity.name}</i>${iconSvg(u.icon)}<b>${u.name}</b>${recipe}<p>${u.text}</p><small>[ ${i + 1} ] 选择改装</small></button>`;
+    };
     showModal(
-        `<h2 id="modal-title">防线稳固。重构火力。</h2><p>第 ${game.wave} 波已肃清 · 全员修复 +35 · 核心修复 +15<br>选择一项改装，效果作用于全队。</p>${online.active ? '<p id="vote-status">两位指挥官各选一项，等待全员投票后出击。</p>' : ''}<div class="upgrade-options">${choices.map((u, i) => `<button class="upgrade-option" data-upgrade="${u.id}">${iconSvg(u.icon)}<b>${u.name}</b><p>${u.text}</p><small>[ ${i + 1} ] 选择改装</small></button>`).join('')}</div>`,
+        `<h2 id="modal-title">防线稳固。重构火力。</h2>${gradeLine}<p>第 ${game.wave} 波已肃清 · 全员修复 +35 · 核心修复 +15<br>选择一项改装，效果作用于全队。凑齐指定组合可解锁<span class="evolution-hint">进化</span>改装。</p>${online.active ? '<p id="vote-status">两位指挥官各选一项，等待全员投票后出击。</p>' : ''}<div class="upgrade-options">${choices.map(card).join('')}</div><button id="reroll-button" class="secondary-button reroll-button" ${game.rerolls > 0 ? '' : 'disabled'}>刷新改装 · 剩余 ${game.rerolls || 0} 次 <span>[ R ]</span></button>`,
     );
     layer
         .querySelectorAll('[data-upgrade]')
         .forEach((button) => (button.onclick = () => game.chooseUpgrade(button.dataset.upgrade)));
+    $('reroll-button').onclick = () => game.rerollUpgrade();
 }
 /** 结算同时呈现本局与本机最高分，提供明确的重玩和退出路径。 */
 function showResult(result) {
@@ -547,6 +564,12 @@ window.addEventListener('keydown', (event) => {
         if (helpPrevious !== null) closeHelp();
         else if (game.state === 'playing') game.pause();
         else if (game.state === 'paused') game.resume();
+        return;
+    }
+    // 改装界面按 R 刷新候选（消耗一次全队共享的刷新次数）。
+    if (game.state === 'upgrade' && helpPrevious === null && event.code === 'KeyR' && !event.repeat) {
+        event.preventDefault();
+        game.rerollUpgrade();
         return;
     }
     if (game.state === 'upgrade' && helpPrevious === null && /^Digit[123]$/.test(event.code)) {

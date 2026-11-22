@@ -162,6 +162,20 @@ export class SoundDirector {
             [0, 4, 7, 12].forEach((note, i) =>
                 this.tone(330 * 2 ** (note / 12), 330 * 2 ** (note / 12), 0.16, 0.11, 'sine', i * 0.07),
             );
+        // 击杀音阶：按连击数在五声音阶（宫商角徵羽）上逐级升高，最多跨三个八度后循环；
+        // 35 毫秒内只响一次，核弹清屏时不会叠成噪音。
+        if (event === 'killnote') {
+            const now = this.context.currentTime;
+            if (now - (this.lastEvents.get('killnote') ?? -100) < 0.035) return;
+            this.lastEvents.set('killnote', now);
+            const scale = [0, 2, 4, 7, 9];
+            const step = Math.max(0, (options.step || 1) - 1) % 15;
+            const note = scale[step % 5] + 12 * Math.floor(step / 5);
+            const frequency = 392 * 2 ** (note / 12);
+            this.tone(frequency, frequency, 0.18, 0.07, 'triangle');
+            this.tone(frequency * 2, frequency * 2, 0.08, 0.025, 'sine');
+            return;
+        }
         // 特装武器拾取：快速上行的锯齿琶音，比普通拾取更亮、更有「换枪」的爽感。
         if (event === 'powerup')
             [0, 7, 12, 19].forEach((note, i) =>

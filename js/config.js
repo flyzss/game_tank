@@ -18,205 +18,66 @@ export const FIELD_EVENTS = {
     bounty: { name: '悬赏目标', description: '击毁金色精英战车，奖励 1000 积分并全员修复。' },
     // 裂隙门：左右两座相位门互相连通，玩家驶入即可瞬移到另一侧，用于救援核心或甩开追兵。
     rift: { name: '相位裂隙', description: '驶入紫色相位门可瞬移到另一侧，灵活支援两翼。' },
+    // 火力全开：开波即给每名玩家配发一件随机特装武器，本波武器掉率提高到三倍。
+    frenzy: { name: '火力全开', description: '全员获得随机特装武器，本波武器掉率 ×3，尽情倾泻火力！' },
+    // 油桶阵：战场中央额外堆放一批燃料桶，射爆即可大范围殉爆，引敌入阵一网打尽。
+    barrels: { name: '燃料油桶阵', description: '射击红色油桶引发连环大爆炸，把敌军引进去再点火。' },
+    // 蜂群潮：本波每隔数秒从战场边缘涌入额外的蜂群无人机，适合扫射清场。
+    swarm: { name: '蜂群潮汐', description: '无人机群从四面涌来——它们很脆，按住开火扫个痛快。' },
 };
+/** 同屏敌军上限：既保证割草的密度，也限制服务器快照体积与寻路开销。 */
+export const MAX_ENEMIES = 26;
+/**
+ * 特装武器：击毁敌军随机掉落，拾取后持续 duration 秒；新拾取的武器会替换当前武器并重置时间。
+ * nuke 为一次性清屏核弹，没有持续时间。color 同时用于掉落物、车体标签与 HUD。
+ */
+export const WEAPONS = {
+    fan: { name: '扇面弹幕', short: '扇', color: '#ffd36e', duration: 10 },
+    laser: { name: '贯穿激光', short: '光', color: '#7ff0ff', duration: 9 },
+    rocket: { name: '追踪飞弹', short: '弹', color: '#ff9a5a', duration: 10 },
+    lightning: { name: '连锁闪电', short: '电', color: '#b5a6ff', duration: 10 },
+    nuke: { name: '清屏核弹', short: '核', color: '#ff6b6b', duration: 0 },
+};
+/**
+ * 精英词缀：第 4 关起普通敌军有概率附带一个词缀，耐久更高并必掉特装武器。
+ * swift 提升移速与射速；armored 大幅提高耐久；volatile 阵亡时爆炸，敌我皆伤。
+ */
+export const AFFIXES = {
+    swift: { name: '迅捷', color: '#8ef0b0' },
+    armored: { name: '重甲', color: '#c7c9d6' },
+    volatile: { name: '爆裂', color: '#ff8a5c' },
+};
+/**
+ * 二十四波战役：敌军数量约为旧版 1.5 倍、生成间隔更短，并逐步引入蜂群、喷火、棱镜与母舰。
+ * count 为本波生成次数（蜂群一次生成一整队），interval 为两次生成间隔（秒），
+ * types 按顺序循环抽取，boss 固定在本波第一次生成，event 为本波战场事件。
+ */
 export const WAVES = [
-    {
-        title: '废墟来客',
-        subtitle: 'FIRST CONTACT',
-        count: 7,
-        interval: 1.6,
-        types: ['scout', 'scout', 'raider'],
-        event: 'supply',
-    },
-    {
-        title: '钢铁洪流',
-        subtitle: 'STEEL TIDE',
-        count: 11,
-        interval: 1.35,
-        types: ['scout', 'raider', 'raider'],
-        event: 'overdrive',
-    },
-    {
-        title: '远处的猎手',
-        subtitle: 'DEADLY HORIZON',
-        count: 13,
-        interval: 1.4,
-        types: ['sniper', 'scout', 'raider'],
-        event: 'beacon',
-    },
-    {
-        title: '重装来袭',
-        subtitle: 'HEAVY PRESSURE',
-        count: 16,
-        interval: 1.25,
-        types: ['heavy', 'raider', 'sniper'],
-        event: 'bombardment',
-    },
-    {
-        title: '自爆车队',
-        subtitle: 'SUICIDE CONVOY',
-        count: 18,
-        interval: 1.1,
-        types: ['bomber', 'scout', 'raider'],
-        event: 'overdrive',
-    },
-    {
-        title: '灰烬之王',
-        subtitle: 'THE ASHEN COLOSSUS',
-        count: 12,
-        interval: 1.75,
-        types: ['heavy', 'raider', 'sniper'],
-        boss: 'boss',
-        event: 'supply',
-    },
-    {
-        title: '雪线遭遇',
-        subtitle: 'WHITE CONTACT',
-        count: 14,
-        interval: 1.3,
-        types: ['scout', 'engineer', 'raider'],
-        event: 'beacon',
-    },
-    {
-        title: '远程压制',
-        subtitle: 'FALLING STEEL',
-        count: 15,
-        interval: 1.4,
-        types: ['artillery', 'sniper', 'raider'],
-        event: 'bombardment',
-    },
-    {
-        title: '裂变车群',
-        subtitle: 'FRACTURE SWARM',
-        count: 16,
-        interval: 1.2,
-        types: ['splitter', 'scout', 'bomber'],
-        event: 'bounty',
-    },
-    {
-        title: '冰原救援',
-        subtitle: 'THE RELAY MUST HOLD',
-        count: 18,
-        interval: 1.1,
-        types: ['engineer', 'heavy', 'raider'],
-        event: 'beacon',
-    },
-    {
-        title: '极夜封锁',
-        subtitle: 'POLAR SIEGE',
-        count: 20,
-        interval: 1.1,
-        types: ['artillery', 'bomber', 'heavy'],
-        event: 'supply',
-    },
-    {
-        title: '霜脊堡垒',
-        subtitle: 'FROSTBOUND TITAN',
-        count: 14,
-        interval: 1.6,
-        types: ['heavy', 'engineer', 'sniper'],
-        boss: 'frostBoss',
-        event: 'overdrive',
-    },
-    {
-        title: '深入熔炉',
-        subtitle: 'INTO THE FOUNDRY',
-        count: 17,
-        interval: 1.15,
-        types: ['bomber', 'splitter', 'raider'],
-        event: 'bombardment',
-    },
-    {
-        title: '炼狱工兵',
-        subtitle: 'REPAIR THE WAR',
-        count: 19,
-        interval: 1.15,
-        types: ['engineer', 'heavy', 'artillery'],
-        event: 'beacon',
-    },
-    {
-        title: '爆裂回路',
-        subtitle: 'CHAIN REACTION',
-        count: 22,
-        interval: 0.95,
-        types: ['bomber', 'splitter', 'scout'],
-        event: 'bounty',
-    },
-    {
-        title: '火雨防线',
-        subtitle: 'UNDER THE FIRESTORM',
-        count: 20,
-        interval: 1.1,
-        types: ['artillery', 'sniper', 'heavy'],
-        event: 'bombardment',
-    },
-    {
-        title: '黎明之前',
-        subtitle: 'ONE LAST STAND',
-        count: 24,
-        interval: 0.95,
-        types: ['splitter', 'engineer', 'bomber', 'heavy'],
-        event: 'supply',
-    },
-    {
-        title: '熔炉主宰',
-        subtitle: 'HEART OF THE INFERNO',
-        count: 16,
-        interval: 1.4,
-        types: ['heavy', 'artillery', 'engineer'],
-        boss: 'infernoBoss',
-        event: 'beacon',
-    },
-    // ---- 第四战区「虚空裂隙」：引入相位幽影、盾卫战车与裂隙主脑 ----
-    {
-        title: '裂隙初现',
-        subtitle: 'FIRST RIFT',
-        count: 16,
-        interval: 1.2,
-        types: ['phantom', 'scout', 'raider'],
-        event: 'rift',
-    },
-    {
-        title: '盾墙推进',
-        subtitle: 'SHIELD WALL',
-        count: 18,
-        interval: 1.2,
-        types: ['guardian', 'sniper', 'raider'],
-        event: 'bounty',
-    },
-    {
-        title: '相位猎杀',
-        subtitle: 'PHASE HUNT',
-        count: 20,
-        interval: 1.05,
-        types: ['phantom', 'bomber', 'guardian'],
-        event: 'bombardment',
-    },
-    {
-        title: '虚空回廊',
-        subtitle: 'HOLLOW CORRIDOR',
-        count: 22,
-        interval: 1,
-        types: ['guardian', 'engineer', 'artillery', 'phantom'],
-        event: 'rift',
-    },
-    {
-        title: '最后的微光',
-        subtitle: 'LAST LIGHT',
-        count: 26,
-        interval: 0.9,
-        types: ['splitter', 'phantom', 'guardian', 'heavy'],
-        event: 'bounty',
-    },
-    {
-        title: '裂隙主脑',
-        subtitle: 'THE RIFT MIND',
-        count: 18,
-        interval: 1.3,
-        types: ['guardian', 'phantom', 'artillery'],
-        boss: 'riftBoss',
-        event: 'supply',
-    },
+    { title: '废墟来客', subtitle: 'FIRST CONTACT', count: 10, interval: 1.3, types: ['scout', 'scout', 'raider'], event: 'supply' },
+    { title: '钢铁洪流', subtitle: 'STEEL TIDE', count: 14, interval: 1.15, types: ['scout', 'raider', 'swarm'], event: 'frenzy' },
+    { title: '远处的猎手', subtitle: 'DEADLY HORIZON', count: 16, interval: 1.15, types: ['sniper', 'scout', 'raider', 'swarm'], event: 'beacon' },
+    { title: '重装来袭', subtitle: 'HEAVY PRESSURE', count: 20, interval: 1.05, types: ['heavy', 'raider', 'sniper', 'flamer'], event: 'barrels' },
+    { title: '自爆车队', subtitle: 'SUICIDE CONVOY', count: 24, interval: 0.9, types: ['bomber', 'swarm', 'scout', 'raider'], event: 'swarm' },
+    { title: '灰烬之王', subtitle: 'THE ASHEN COLOSSUS', count: 18, interval: 1.3, types: ['heavy', 'raider', 'flamer', 'swarm'], boss: 'boss', event: 'supply' },
+    { title: '雪线遭遇', subtitle: 'WHITE CONTACT', count: 20, interval: 1.05, types: ['scout', 'engineer', 'raider', 'lancer'], event: 'beacon' },
+    { title: '远程压制', subtitle: 'FALLING STEEL', count: 22, interval: 1.05, types: ['artillery', 'lancer', 'raider', 'swarm'], event: 'bombardment' },
+    { title: '裂变车群', subtitle: 'FRACTURE SWARM', count: 24, interval: 0.95, types: ['splitter', 'scout', 'bomber'], event: 'bounty' },
+    { title: '冰原救援', subtitle: 'THE RELAY MUST HOLD', count: 26, interval: 0.9, types: ['engineer', 'heavy', 'flamer', 'swarm'], event: 'frenzy' },
+    { title: '极夜封锁', subtitle: 'POLAR SIEGE', count: 28, interval: 0.9, types: ['artillery', 'carrier', 'bomber', 'heavy'], event: 'barrels' },
+    { title: '霜脊堡垒', subtitle: 'FROSTBOUND TITAN', count: 20, interval: 1.2, types: ['heavy', 'engineer', 'lancer', 'swarm'], boss: 'frostBoss', event: 'overdrive' },
+    { title: '深入熔炉', subtitle: 'INTO THE FOUNDRY', count: 26, interval: 0.9, types: ['bomber', 'splitter', 'flamer', 'raider'], event: 'bombardment' },
+    { title: '炼狱工兵', subtitle: 'REPAIR THE WAR', count: 28, interval: 0.9, types: ['engineer', 'heavy', 'artillery', 'flamer'], event: 'beacon' },
+    { title: '爆裂回路', subtitle: 'CHAIN REACTION', count: 32, interval: 0.75, types: ['bomber', 'splitter', 'swarm', 'scout'], event: 'swarm' },
+    { title: '火雨防线', subtitle: 'UNDER THE FIRESTORM', count: 30, interval: 0.85, types: ['artillery', 'lancer', 'heavy', 'carrier'], event: 'barrels' },
+    { title: '黎明之前', subtitle: 'ONE LAST STAND', count: 34, interval: 0.75, types: ['splitter', 'engineer', 'bomber', 'heavy', 'flamer'], event: 'frenzy' },
+    { title: '熔炉主宰', subtitle: 'HEART OF THE INFERNO', count: 24, interval: 1.1, types: ['heavy', 'artillery', 'flamer', 'carrier'], boss: 'infernoBoss', event: 'beacon' },
+    // ---- 第四战区「虚空裂隙」：相位幽影、盾卫战车与裂隙主脑，配合棱镜与母舰形成立体火力 ----
+    { title: '裂隙初现', subtitle: 'FIRST RIFT', count: 26, interval: 0.95, types: ['phantom', 'scout', 'raider', 'swarm'], event: 'rift' },
+    { title: '盾墙推进', subtitle: 'SHIELD WALL', count: 28, interval: 0.9, types: ['guardian', 'sniper', 'flamer', 'lancer'], event: 'bounty' },
+    { title: '相位猎杀', subtitle: 'PHASE HUNT', count: 30, interval: 0.85, types: ['phantom', 'bomber', 'guardian', 'swarm'], event: 'swarm' },
+    { title: '虚空回廊', subtitle: 'HOLLOW CORRIDOR', count: 32, interval: 0.8, types: ['guardian', 'engineer', 'artillery', 'phantom', 'carrier'], event: 'rift' },
+    { title: '最后的微光', subtitle: 'LAST LIGHT', count: 36, interval: 0.7, types: ['splitter', 'phantom', 'guardian', 'heavy', 'lancer'], event: 'frenzy' },
+    { title: '裂隙主脑', subtitle: 'THE RIFT MIND', count: 26, interval: 1, types: ['guardian', 'phantom', 'artillery', 'carrier'], boss: 'riftBoss', event: 'supply' },
 ];
 /** 不同敌人拥有独立的速度、装甲、交战距离和火力节奏。 */
 export const ENEMIES = {
@@ -334,9 +195,58 @@ export const ENEMIES = {
         radius: 17,
         blink: true,
     },
+    // 蜂群无人机：极脆、极快，成队出现并撞向目标自爆；单只威胁小，成群时必须扫射清理。
+    swarm: {
+        name: '蜂群无人机',
+        hp: 16,
+        speed: 165,
+        cooldown: 99,
+        damage: 8,
+        range: 40,
+        score: 40,
+        color: '#e8c56c',
+        radius: 11,
+        drone: true,
+    },
+    // 喷火战车：短距离持续喷射火焰，近身压制极强，需要在射程外远程点杀。
+    flamer: {
+        name: '喷火战车',
+        hp: 120,
+        speed: 64,
+        cooldown: 0.13,
+        damage: 6,
+        range: 175,
+        score: 260,
+        color: '#e0804a',
+        radius: 20,
+    },
+    // 棱镜炮车：锁定后显示 1 秒激光预警线，随后发射贯穿光束，被掩体阻挡。
+    lancer: {
+        name: '棱镜炮车',
+        hp: 85,
+        speed: 44,
+        cooldown: 3.6,
+        damage: 26,
+        range: 640,
+        score: 300,
+        color: '#8fc7d8',
+        radius: 19,
+    },
+    // 蜂巢母舰：自身不开炮，但会周期性释放蜂群无人机；优先击毁可以截断源源不断的增援。
+    carrier: {
+        name: '蜂巢母舰',
+        hp: 280,
+        speed: 30,
+        cooldown: 5,
+        damage: 0,
+        range: 720,
+        score: 480,
+        color: '#a99a70',
+        radius: 27,
+    },
     frostBoss: {
         name: '霜脊堡垒',
-        hp: 2100,
+        hp: 2600,
         speed: 34,
         cooldown: 1.5,
         damage: 15,
@@ -348,7 +258,7 @@ export const ENEMIES = {
     },
     infernoBoss: {
         name: '熔炉主宰',
-        hp: 2500,
+        hp: 3100,
         speed: 38,
         cooldown: 1.3,
         damage: 16,
@@ -361,7 +271,7 @@ export const ENEMIES = {
     // 裂隙主脑：最终首领，周期性瞬移并召唤相位幽影，半血后弹幕变为双层螺旋。
     riftBoss: {
         name: '裂隙主脑',
-        hp: 2900,
+        hp: 3600,
         speed: 36,
         cooldown: 1.3,
         damage: 16,
@@ -374,7 +284,7 @@ export const ENEMIES = {
     boss: {
         boss: true,
         name: '灰烬之王',
-        hp: 1750,
+        hp: 2200,
         speed: 31,
         cooldown: 1.6,
         damage: 12,
@@ -526,6 +436,63 @@ export const UPGRADES = [
         max: 1,
         apply: (p) => {
             p.chain = true;
+        },
+    },
+    {
+        // 高爆弹头：主炮命中敌军时额外爆炸，按命中伤害比例波及周围敌军，叠加两次后清群极快。
+        id: 'explosive',
+        name: '高爆弹头',
+        text: '炮弹命中时爆炸，对周围敌军造成 40% 溅射伤害。',
+        icon: 'nova',
+        max: 2,
+        apply: (p) => {
+            p.explosive += 0.4;
+        },
+    },
+    {
+        // 致命校准：每发炮弹独立判定暴击，暴击伤害 ×2.5 并显示醒目的暴击数字。
+        id: 'crit',
+        name: '致命校准',
+        text: '炮弹有 18% 概率暴击，造成 2.5 倍伤害。',
+        icon: 'shell',
+        max: 2,
+        apply: (p) => {
+            p.crit += 0.18;
+        },
+    },
+    {
+        // 僚机无人机：围绕战车旋转的小型无人机，自动射击最近的敌军。
+        id: 'drone',
+        name: '僚机无人机',
+        text: '获得一架环绕战车的僚机，自动射击附近敌军。',
+        icon: 'core',
+        max: 2,
+        apply: (p) => {
+            p.drones += 1;
+        },
+    },
+    {
+        // 狂热回路：击杀积攒狂热值更快，狂热模式持续时间更长。
+        id: 'fever',
+        name: '狂热回路',
+        text: '狂热值积攒速度 +40%，狂热模式持续 +3 秒。',
+        icon: 'rapid',
+        max: 2,
+        apply: (p) => {
+            p.feverGain += 0.4;
+            p.feverBonus += 3;
+        },
+    },
+    {
+        // 磁吸回收：扩大掉落物吸附范围，特装武器持续时间延长。
+        id: 'magnet',
+        name: '磁吸回收臂',
+        text: '拾取范围翻倍，特装武器持续时间 +40%。',
+        icon: 'speed',
+        max: 1,
+        apply: (p) => {
+            p.magnet = 2;
+            p.weaponBonus += 0.4;
         },
     },
 ];

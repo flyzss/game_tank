@@ -162,6 +162,32 @@ export class SoundDirector {
             [0, 4, 7, 12].forEach((note, i) =>
                 this.tone(330 * 2 ** (note / 12), 330 * 2 ** (note / 12), 0.16, 0.11, 'sine', i * 0.07),
             );
+        // 特装武器拾取：快速上行的锯齿琶音，比普通拾取更亮、更有「换枪」的爽感。
+        if (event === 'powerup')
+            [0, 7, 12, 19].forEach((note, i) =>
+                this.tone(392 * 2 ** (note / 12), 392 * 2 ** ((note + 2) / 12), 0.12, 0.09, 'sawtooth', i * 0.045),
+            );
+        // 狂热模式：低频起跳后迅速扫频到高音，并叠一层高通噪声的「点火」声。
+        if (event === 'fever') {
+            this.tone(110, 880, 0.55, 0.2, 'sawtooth');
+            this.tone(220, 1760, 0.55, 0.08, 'square', 0.05);
+            this.noise(0.4, 0.12, 3000, 'highpass');
+        }
+        // 核弹：复用爆炸音色并加强力度，再叠一条长长的次低频下滑，制造「整个战场塌下去」的压迫感。
+        if (event === 'nuke') {
+            if (this.effects.has('explode')) this.playEffect('explode', { ...options, strength: 1.6 });
+            this.tone(90, 25, 1.4, 0.45, 'sine');
+            this.noise(1.2, 0.25, 900);
+        }
+        // 棱镜光束发射：高频方波快速下滑，听起来像能量释放。
+        if (event === 'laser') this.tone(1500, 180, 0.22, 0.07, 'square');
+        // 连杀播报：音阶随连杀强度升高。
+        if (event === 'streak') {
+            const lift = Math.round((options.strength || 1) * 4);
+            [0, 4, 7].forEach((note, i) =>
+                this.tone(523 * 2 ** ((note + lift) / 12), 523 * 2 ** ((note + lift) / 12), 0.14, 0.1, 'triangle', i * 0.06),
+            );
+        }
         if (event === 'wave')
             [130, 164, 196].forEach((note, i) => this.tone(note, note, 0.6, 0.13, 'triangle', i * 0.14));
         if (event === 'win')

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../js/game.js';
-import { WAVES, UPGRADES } from '../js/config.js';
+import { WAVES, UPGRADES, MAX_ENEMIES } from '../js/config.js';
 import { createSnapshot } from '../js/protocol.js';
 
 /** 使用正式模拟器创建对局；events 记录模拟层发出的界面事件，便于断言提示文本。 */
@@ -118,10 +118,10 @@ test('裂隙主脑周期瞬移并召唤幽影，召唤数受敌军上限约束',
     boss.blinkCd = 0;
     g.updateBlink(boss, g.core, 0.016);
     assert.ok(g.enemies.filter((e) => e.type === 'phantom').length >= 1);
-    while (g.enemies.length < 18) enemyAt(g, 'scout', 100, 100);
+    while (g.enemies.length < MAX_ENEMIES) enemyAt(g, 'scout', 100, 100);
     boss.blinkCd = 0;
     g.updateBlink(boss, g.core, 0.016);
-    assert.equal(g.enemies.length, 18);
+    assert.equal(g.enemies.length, MAX_ENEMIES);
 });
 
 test('联机快照不再携带粒子与寻路数据，体积受控', () => {
@@ -132,4 +132,136 @@ test('联机快照不再携带粒子与寻路数据，体积受控', () => {
     assert.ok(g.particles.length > 0);
     assert.ok(Array.isArray(snapshot.portals));
     assert.ok(JSON.stringify(snapshot).length < 20000);
+});
+
+test('棱镜炮车先预警后发射光束，掩体截断光束并保护玩家', () => {
+    const { g } = setup(1);
+    const p = g.players[0];
+    p.invincible = 0;
+    p.x = 640;
+    p.y = 600;
+    const lancer = enemyAt(g, 'lancer', 640, 200);
+    lancer.angle = Math.PI / 2;
+    g.fire(lancer, true);
+    assert.equal(g.beams.length, 1);
+    g.updateBeams(0.5);
+    assert.equal(p.hp, p.maxHp, '预警期间不造成伤害');
+    g.updateBeams(0.6);
+    assert.ok(p.hp < p.maxHp, '预警结束后光束命中玩家');
+    // 中间放一块钢墙，新光束长度被截断，不再伤到墙后的玩家。
+    g.walls = [{ x: 620, y: 380, w: 40, h: 40, hp: Infinity, maxHp: 85, steel: true, hit: 0 }];
+    g.beams = [];
+    p.hp = p.maxHp;
+    p.invincible = 0;
+    g.fire(lancer, true);
+    assert.ok(g.beams[0].length < 260);
+    g.updateBeams(1.1);
+    assert.equal(p.hp, p.maxHp);
+});
+
+test('蜂群生成受同屏上限约束，贴身自爆伤害玩家', () => {
+    const { g } = setup(0);
+    g.enemies = [];
+    const made = g.spawnSwarm(640, 300, 40);
+    assert.equal(made.length, MAX_ENEMIES);
+    const p = g.players[0];
+    p.invincible = 0;
+    g.enemies = [];
+    const drone = enemyAt(g, 'swarm', p.x + 20, p.y);
+    g.updateEnemy(drone, 0.016);
+    assert.equal(drone.dead, true);
+    assert.ok(p.hp < p.maxHp);
+});
+
+test('油桶被射爆后范围伤害敌军并连锁引爆相邻油桶', () => {
+    const { g } = setup(0);
+    g.barrels = [
+        { x: 400, y: 300, radius: 15, hp: 30, dead: false },
+        { x: 480, y: 300, radius: 15, hp: 30, dead: false },
+    ];
+    const enemy = enemyAt(g, 'raider', 560, 300);
+    const p = g.players[0];
+    p.x = 300;
+    p.y = 300;
+    g.createBullet(p, 0, false, 2000, 40);
+    g.updateBullets(0.05);
+    assert.ok(g.barrels.every((b) => b.dead), '两只油桶都应爆炸');
+    assert.ok(enemy.hp < enemy.maxHp);
+});
+
+test('特装武器：扇面增加弹数，激光无限穿透，核弹清屏且不占武器槽', () => {
+    const { g } = setup(0);
+    const p = g.players[0];
+    g.giveWeapon(p, 'fan');
+    assert.equal(p.weapon, 'fan');
+    assert.ok(p.weaponTime > 0);
+    g.fire(p, false);
+    assert.equal(g.bullets.length, 5);
+    g.bullets = [];
+    g.giveWeapon(p, 'laser');
+    g.fire(p, false);
+    assert.ok(g.bullets[0].pierce >= 99);
+    const enemies = [0, 1, 2].map((i) => enemyAt(g, 'scout', 300 + i * 200, 200));
+    g.giveWeapon(p, 'nuke');
+    assert.equal(p.weapon, 'laser');
+    assert.ok(enemies.every((e) => e.dead));
+    g.updatePlayer(p, 20);
+    assert.equal(p.weapon, '');
+});
+
+test('击杀积攒狂热值，满值进入狂热模式：射速翻倍、受伤减半', () => {
+    const { g } = setup(0);
+    const p = g.players[0];
+    for (let i = 0; i < 25; i++) g.damageEnemy(enemyAt(g, 'raider', 200 + i * 10, 200), 9999);
+    assert.ok(g.feverTime > 0, '25 次普通击毁应填满狂热值');
+    p.invincible = 0;
+    g.damagePlayer(p, 20);
+    assert.equal(p.hp, p.maxHp - 10);
+    g.keys.add('Space');
+    p.fireCd = 0;
+    g.updatePlayer(p, 0.001);
+    assert.ok(Math.abs(p.fireCd - p.fireRate * 0.5) < 1e-9);
+});
+
+test('精英与首领必掉特装武器，首领还会掉落核弹', () => {
+    const { g } = setup(0);
+    g.wave = 10;
+    const elite = enemyAt(g, 'raider', 400, 300);
+    elite.affix = 'swift';
+    g.pickups = [];
+    g.damageEnemy(elite, 9999);
+    assert.ok(g.pickups.some((item) => ['fan', 'laser', 'rocket', 'lightning', 'nuke'].includes(item.kind)));
+    g.pickups = [];
+    const boss = enemyAt(g, 'boss', 640, 200);
+    g.damageEnemy(boss, 1e6);
+    assert.ok(g.pickups.some((item) => item.kind === 'nuke'));
+    assert.ok(g.pickups.length >= 5);
+});
+
+test('首领跌破三分之二耐久时进入二阶段并召唤蜂群护卫', () => {
+    const { g } = setup(0);
+    g.enemies = [];
+    const boss = enemyAt(g, 'boss', 640, 200);
+    boss.hp = boss.maxHp * 0.6;
+    g.updateEnemy(boss, 0.016);
+    assert.equal(boss.phase, 1);
+    assert.ok(g.enemies.some((e) => e.drone));
+    assert.ok(g.announce);
+});
+
+test('连锁闪电命中后跳向附近敌人，高爆弹头对周围敌军溅射', () => {
+    const { g } = setup(0);
+    const p = g.players[0];
+    const targets = [0, 1, 2].map((i) => enemyAt(g, 'heavy', 500 + i * 100, 300));
+    g.chainLightning(targets[0], 30, 3);
+    assert.ok(targets[1].hp < targets[1].maxHp && targets[2].hp < targets[2].maxHp);
+    assert.ok(g.arcs.length >= 2);
+    UPGRADES.find((u) => u.id === 'explosive').apply(p);
+    const a = enemyAt(g, 'heavy', 300, 600),
+        b = enemyAt(g, 'heavy', 340, 600);
+    p.x = 150;
+    p.y = 600;
+    g.createBullet(p, 0, false, 2000, 50, { explosive: p.explosive });
+    g.updateBullets(0.1);
+    assert.ok(b.hp < b.maxHp, '相邻敌军受到溅射');
 });

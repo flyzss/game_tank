@@ -1,4 +1,4 @@
-import { WORLD, WAVES, ZONES } from './config.js';
+import { WORLD, WAVES, ZONES, WEAPONS, AFFIXES } from './config.js';
 import { clamp } from './game.js';
 
 /** Canvas 美术层：离屏绘制静态废墟，实时只重绘实体、灯光和反馈。 */
@@ -225,12 +225,22 @@ export class Renderer {
         for (const w of g.wrecks) this.drawWreck(c, w);
         for (const wall of g.walls) this.drawWall(c, wall);
         this.drawField(c, g, time);
+        for (const barrel of g.barrels || []) if (!barrel.dead) this.drawBarrel(c, barrel, time);
         this.drawCore(c, g.core, time);
         for (const turret of g.turrets) this.drawTurret(c, turret);
         for (const item of g.pickups) this.drawPickup(c, item, time);
-        for (const enemy of g.enemies) this.drawTank(c, enemy, true, time);
-        for (const player of g.players) if (player.hp > 0) this.drawTank(c, player, false, time);
+        // 蜂群无人机使用独立的三角机体外形，其余敌军沿用坦克绘制。
+        for (const enemy of g.enemies)
+            if (enemy.drone) this.drawDrone(c, enemy, time);
+            else this.drawTank(c, enemy, true, time);
+        for (const player of g.players)
+            if (player.hp > 0) {
+                this.drawTank(c, player, false, time);
+                this.drawWingmen(c, player, g.time);
+            }
         this.drawBullets(c, g.bullets);
+        this.drawBeams(c, g.beams || [], time);
+        this.drawArcs(c, g.arcs || []);
         for (const impact of g.impacts) this.drawImpact(c, impact);
         for (const r of g.rings) {
             c.globalAlpha = clamp(r.life / r.maxLife, 0, 1);
@@ -266,7 +276,9 @@ export class Renderer {
         for (const t of g.texts) {
             c.globalAlpha = Math.min(1, (t.life / t.maxLife) * 2);
             c.fillStyle = t.color;
-            c.font = '700 17px Chakra, Microsoft YaHei, sans-serif';
+            // 暴击与武器名称使用大号字并在出现瞬间放大，普通伤害数字保持 17px。
+            const pop = t.big ? 1 + Math.max(0, t.life / t.maxLife - 0.75) * 2.4 : 1;
+            c.font = `700 ${Math.round((t.big ? 24 : 17) * pop)}px Chakra, Microsoft YaHei, sans-serif`;
             c.textAlign = 'center';
             c.strokeStyle = '#152016';
             c.lineWidth = 3;
@@ -295,15 +307,22 @@ export class Renderer {
         }
         if (g.state === 'playing' && g.pointer.used && !g.touchFire) this.drawReticle(c, g.pointer);
         if (g.combo >= 2 && g.state === 'playing') {
+            // 连击字号随连击数成长（上限 52px），颜色从琥珀过渡到品红；下方显示积分倍率与剩余窗口。
+            const size = Math.min(52, 28 + g.combo * 0.4);
+            const hot = g.combo >= 30;
             c.textAlign = 'right';
-            c.fillStyle = '#f6bc78';
-            c.font = '700 28px Chakra,sans-serif';
-            c.fillText(`${g.combo}× CHAIN`, 1240, 100);
+            c.fillStyle = hot ? '#ff7ad9' : '#f6bc78';
+            c.font = `700 ${Math.round(size)}px Chakra,sans-serif`;
+            c.fillText(`${g.combo}× CHAIN`, 1240, 92 + size * 0.3);
             c.fillStyle = '#e3dcc0';
             c.font = '12px Microsoft YaHei,sans-serif';
-            c.fillText('连续击破', 1240, 121);
+            c.fillText(`连续击破 · 积分 ×${Math.min(5, 1 + (g.combo - 1) * 0.05).toFixed(2)}`, 1240, 118 + size * 0.3);
+            c.fillStyle = '#f6bc7855';
+            c.fillRect(1240 - 120, 124 + size * 0.3, 120 * clamp(g.comboTime / 3.5, 0, 1), 3);
             c.textAlign = 'left';
         }
+        this.drawFever(c, g, time);
+        this.drawAnnounce(c, g.announce);
         const boss = g.enemies.find((e) => e.boss && !e.dead);
         if (boss) this.drawBossBar(c, boss);
         // 核心低耐久通过边缘警示反馈，而不是持续闪烁遮挡整个战场。
@@ -838,6 +857,32 @@ export class Renderer {
             c.fillStyle = '#e5aa75';
             c.fillRect(x - r, y - r - 11, r * 2 * Math.max(0, tank.hp / tank.maxHp), 3);
         }
+        // 玩家特装武器：车体下方显示武器名与剩余时间条。
+        if (!enemy && tank.weapon && WEAPONS[tank.weapon]) {
+            const weapon = WEAPONS[tank.weapon];
+            c.textAlign = 'center';
+            c.font = '700 11px Microsoft YaHei,sans-serif';
+            c.fillStyle = weapon.color;
+            c.fillText(`${weapon.name} ${Math.ceil(tank.weaponTime)}s`, x, y + r + 22);
+            c.fillRect(x - 20, y + r + 26, 40 * clamp(tank.weaponTime / weapon.duration, 0, 1), 2);
+            c.textAlign = 'left';
+        }
+        // 精英词缀：彩色双环与词缀名，提示该目标更难缠但必掉特装武器。
+        if (enemy && tank.affix && AFFIXES[tank.affix]) {
+            const affix = AFFIXES[tank.affix];
+            c.strokeStyle = affix.color;
+            c.lineWidth = 2;
+            c.setLineDash([4, 4]);
+            c.beginPath();
+            c.arc(x, y, r + 10, time * 2, time * 2 + Math.PI * 2);
+            c.stroke();
+            c.setLineDash([]);
+            c.textAlign = 'center';
+            c.font = '700 11px Microsoft YaHei,sans-serif';
+            c.fillStyle = affix.color;
+            c.fillText(`精英·${affix.name}`, x, y - r - 16);
+            c.textAlign = 'left';
+        }
         // 盾卫：车头前方的弧形相位护盾，提示玩家从侧后方攻击。
         if (enemy && tank.shield) {
             c.strokeStyle = '#b9c4ffcc';
@@ -880,15 +925,241 @@ export class Renderer {
         }
         c.restore();
     }
+    /** 燃料桶：红色圆桶 + 黄色危险条纹，受损时（hp 降低）冒出闪烁火星提示即将爆炸。 */
+    drawBarrel(c, b, time) {
+        c.save();
+        c.translate(b.x, b.y);
+        c.fillStyle = '#0c1919a3';
+        c.beginPath();
+        c.ellipse(5, 7, b.radius, b.radius * 0.8, 0, 0, Math.PI * 2);
+        c.fill();
+        c.fillStyle = b.hp < 30 && Math.floor(time * 10) % 2 ? '#ff8a5a' : '#b8322a';
+        c.beginPath();
+        c.arc(0, 0, b.radius, 0, Math.PI * 2);
+        c.fill();
+        c.strokeStyle = '#ffcf5a';
+        c.lineWidth = 3;
+        c.beginPath();
+        c.arc(0, 0, b.radius - 4, 0.3, 1.3);
+        c.moveTo(Math.cos(2.4) * (b.radius - 4), Math.sin(2.4) * (b.radius - 4));
+        c.arc(0, 0, b.radius - 4, 2.4, 3.4);
+        c.moveTo(Math.cos(4.5) * (b.radius - 4), Math.sin(4.5) * (b.radius - 4));
+        c.arc(0, 0, b.radius - 4, 4.5, 5.5);
+        c.stroke();
+        c.fillStyle = '#2a0f0c';
+        c.beginPath();
+        c.arc(0, 0, 4, 0, Math.PI * 2);
+        c.fill();
+        c.restore();
+    }
+    /** 蜂群无人机：小型三角机体 + 闪烁的尾灯，与坦克轮廓明显区分，便于玩家一眼识别「可以扫射的杂兵」。 */
+    drawDrone(c, e, time) {
+        if (e.warning > 0 && this.game.state !== 'menu') {
+            c.strokeStyle = '#e8c56c88';
+            c.lineWidth = 1.5;
+            c.beginPath();
+            c.arc(e.x, e.y, e.radius + 8, 0, Math.PI * 2);
+            c.stroke();
+            return;
+        }
+        c.save();
+        c.translate(e.x + (e.joltX || 0), e.y + (e.joltY || 0));
+        c.rotate(e.bodyAngle);
+        c.fillStyle = '#0c191988';
+        c.beginPath();
+        c.moveTo(18, 6);
+        c.lineTo(-6, -6);
+        c.lineTo(-6, 18);
+        c.closePath();
+        c.fill();
+        c.fillStyle = e.hit > 0 ? '#ffffff' : e.color;
+        c.beginPath();
+        c.moveTo(14, 0);
+        c.lineTo(-9, -10);
+        c.lineTo(-4, 0);
+        c.lineTo(-9, 10);
+        c.closePath();
+        c.fill();
+        c.fillStyle = Math.floor(time * 12 + e.netId) % 2 ? '#ff5a3a' : '#ffd27a';
+        c.fillRect(-7, -2, 4, 4);
+        c.restore();
+    }
+    /** 僚机：按模拟层相同的环绕公式（time × 3 + 序号均分角度，半径 34）绘制小型菱形无人机。 */
+    drawWingmen(c, p, simTime) {
+        for (let i = 0; i < (p.drones || 0); i++) {
+            const orbit = simTime * 3 + (i * Math.PI * 2) / p.drones;
+            c.save();
+            c.translate(p.x + Math.cos(orbit) * 34, p.y + Math.sin(orbit) * 34);
+            c.rotate(orbit);
+            c.fillStyle = p.color;
+            c.strokeStyle = '#f5f2ca';
+            c.lineWidth = 1;
+            c.beginPath();
+            c.moveTo(7, 0);
+            c.lineTo(0, -5);
+            c.lineTo(-7, 0);
+            c.lineTo(0, 5);
+            c.closePath();
+            c.fill();
+            c.stroke();
+            c.restore();
+        }
+    }
+    /** 棱镜光束：预警期为逐渐收窄的虚线，发射后是一道明亮的青白色粗光束并快速淡出。 */
+    drawBeams(c, beams, time) {
+        c.save();
+        c.lineCap = 'round';
+        for (const beam of beams) {
+            const x2 = beam.x + Math.cos(beam.angle) * beam.length,
+                y2 = beam.y + Math.sin(beam.angle) * beam.length;
+            c.beginPath();
+            c.moveTo(beam.x, beam.y);
+            c.lineTo(x2, y2);
+            if (!beam.fired) {
+                const t = clamp(1 - beam.warn, 0, 1);
+                c.strokeStyle = `rgba(143,231,255,${0.25 + t * 0.5 + Math.sin(time * 30) * 0.1})`;
+                c.lineWidth = 1 + t * 3;
+                c.setLineDash([10, 8]);
+                c.stroke();
+                c.setLineDash([]);
+            } else {
+                const t = clamp(beam.life / 0.28, 0, 1);
+                c.globalCompositeOperation = 'lighter';
+                c.strokeStyle = `rgba(120,220,255,${t * 0.5})`;
+                c.lineWidth = 22 * t + 4;
+                c.stroke();
+                c.strokeStyle = `rgba(240,255,255,${t})`;
+                c.lineWidth = 5 * t + 1;
+                c.stroke();
+                c.globalCompositeOperation = 'source-over';
+            }
+        }
+        c.restore();
+    }
+    /** 连锁闪电：在两端点之间生成带随机折点的紫白电弧，每帧重新抖动以产生跳动感。 */
+    drawArcs(c, arcs) {
+        c.save();
+        c.globalCompositeOperation = 'lighter';
+        for (const a of arcs) {
+            const alpha = clamp(a.life / a.maxLife, 0, 1);
+            const dx = a.x2 - a.x1,
+                dy = a.y2 - a.y1,
+                length = Math.hypot(dx, dy) || 1;
+            const nx = -dy / length,
+                ny = dx / length;
+            for (const [width, color] of [
+                [6, `rgba(181,166,255,${alpha * 0.45})`],
+                [2, `rgba(245,240,255,${alpha})`],
+            ]) {
+                c.strokeStyle = color;
+                c.lineWidth = width;
+                c.beginPath();
+                c.moveTo(a.x1, a.y1);
+                for (let i = 1; i < 6; i++) {
+                    const t = i / 6,
+                        jitter = (Math.random() - 0.5) * 22;
+                    c.lineTo(a.x1 + dx * t + nx * jitter, a.y1 + dy * t + ny * jitter);
+                }
+                c.lineTo(a.x2, a.y2);
+                c.stroke();
+            }
+        }
+        c.restore();
+    }
+    /**
+     * 狂热系统 HUD：战场底部中央显示狂热值进度条；狂热模式期间四周泛起品红光晕，
+     * 进度条改为倒计时，并在顶部显示 FEVER 字样。
+     */
+    drawFever(c, g, time) {
+        if (g.state !== 'playing' && g.state !== 'paused') return;
+        const active = (g.feverTime || 0) > 0;
+        if (active && !this.reduceMotion) {
+            const pulse = 0.18 + Math.sin(time * 10) * 0.06;
+            const edge = c.createRadialGradient(640, 400, 330, 640, 400, 780);
+            edge.addColorStop(0, 'rgba(255,90,200,0)');
+            edge.addColorStop(1, `rgba(255,90,200,${pulse})`);
+            c.fillStyle = edge;
+            c.fillRect(0, 0, 1280, 800);
+        }
+        const width = 260,
+            x = 640 - width / 2,
+            y = 772;
+        c.fillStyle = '#121a16cc';
+        c.fillRect(x - 4, y - 4, width + 8, 12);
+        const ratio = active ? clamp(g.feverTime / 11, 0, 1) : clamp((g.fever || 0) / 100, 0, 1);
+        c.fillStyle = active ? '#ff7ad9' : ratio > 0.8 ? '#ffb0e8' : '#c77bb0';
+        c.fillRect(x, y, width * ratio, 4);
+        c.textAlign = 'center';
+        c.font = '700 11px Chakra, Microsoft YaHei, sans-serif';
+        c.fillStyle = active ? '#ffd0f2' : '#d8b6cc';
+        c.fillText(active ? `FEVER 狂热中 ${g.feverTime.toFixed(1)}s` : `狂热值 ${Math.floor(g.fever || 0)}%`, 640, y - 8);
+        c.textAlign = 'left';
+    }
+    /** 屏幕中央大字播报：出现时从 1.6 倍缩放回落并淡出，用于连杀、狂热、核弹与首领阶段。 */
+    drawAnnounce(c, a) {
+        if (!a) return;
+        const t = clamp(a.life / a.maxLife, 0, 1);
+        const scale = this.reduceMotion ? 1 : 1 + Math.max(0, t - 0.8) * 3;
+        c.save();
+        c.translate(640, 250);
+        c.scale(scale, scale);
+        c.globalAlpha = Math.min(1, t * 2.5);
+        c.textAlign = 'center';
+        c.font = '700 54px Chakra, Microsoft YaHei, sans-serif';
+        c.lineWidth = 6;
+        c.strokeStyle = '#140d12';
+        c.strokeText(a.text, 0, 0);
+        c.fillStyle = a.color;
+        c.fillText(a.text, 0, 0);
+        c.font = '700 14px Chakra, Microsoft YaHei, sans-serif';
+        c.lineWidth = 3;
+        c.strokeText(a.sub || '', 0, 28);
+        c.fillStyle = '#f3ead0';
+        c.fillText(a.sub || '', 0, 28);
+        c.restore();
+    }
     /** 弹道采用亮色弹头与短拖尾，敌我双色在深色地面上保持区分。 */
     drawBullets(c, bullets) {
         c.save();
         c.lineCap = 'round';
         for (const b of bullets) {
-            const length = b.enemy ? 14 : 24,
-                color = b.tint || (b.enemy ? '#f7a466' : '#e6f1ae');
-            c.strokeStyle = b.enemy ? '#f09b5144' : '#dceaa43d';
-            c.lineWidth = 9;
+            // 喷火火焰：随寿命膨胀并变暗的柔和火团，使用加色混合形成火墙。
+            if (b.kind === 'flame') {
+                const t = 1 - clamp(b.life / 0.55, 0, 1);
+                c.save();
+                c.globalCompositeOperation = 'lighter';
+                c.globalAlpha = 0.55 * (1 - t) + 0.1;
+                c.fillStyle = t < 0.4 ? '#ffd27a' : '#ff7a3a';
+                c.beginPath();
+                c.arc(b.x, b.y, 6 + t * 12, 0, Math.PI * 2);
+                c.fill();
+                c.restore();
+                continue;
+            }
+            // 追踪飞弹：橙色弹体 + 长尾烟迹，便于在弹幕中辨认。
+            if (b.kind === 'rocket') {
+                c.strokeStyle = '#ff9a5a55';
+                c.lineWidth = 6;
+                c.beginPath();
+                c.moveTo(b.x, b.y);
+                c.lineTo(b.x - Math.cos(b.angle) * 30, b.y - Math.sin(b.angle) * 30);
+                c.stroke();
+                c.save();
+                c.translate(b.x, b.y);
+                c.rotate(b.angle);
+                c.fillStyle = '#ffcf8a';
+                c.fillRect(-7, -2.5, 12, 5);
+                c.fillStyle = '#ff6a3a';
+                c.fillRect(-10, -1.5, 4, 3);
+                c.restore();
+                continue;
+            }
+            const laser = b.kind === 'laser',
+                spark = b.kind === 'spark';
+            const length = b.enemy ? 14 : laser ? 46 : 24,
+                color = b.tint || (b.enemy ? '#f7a466' : laser ? '#7ff0ff' : spark ? '#c9bbff' : b.crit ? '#fff27a' : '#e6f1ae');
+            c.strokeStyle = b.enemy ? '#f09b5144' : laser ? '#7ff0ff44' : spark ? '#b5a6ff44' : '#dceaa43d';
+            c.lineWidth = laser ? 11 : 9;
             c.beginPath();
             c.moveTo(b.x, b.y);
             c.lineTo(b.x - Math.cos(b.angle) * length, b.y - Math.sin(b.angle) * length);
@@ -906,6 +1177,39 @@ export class Renderer {
     /** 维修掉落用十字标识和小型能量环呈现，可通过形状与颜色共同辨识。 */
     drawPickup(c, p, time) {
         const bob = this.reduceMotion ? 0 : Math.sin(time * 4 + p.x) * 3;
+        // 特装武器：旋转的彩色六边形，中央是单字标识，下方显示武器名；临近消失时闪烁提示。
+        const weapon = WEAPONS[p.kind];
+        if (weapon) {
+            if (p.life < 4 && Math.floor(time * 8) % 2) return;
+            c.save();
+            c.translate(p.x, p.y + bob);
+            const glow = c.createRadialGradient(0, 0, 2, 0, 0, 34);
+            glow.addColorStop(0, weapon.color + '66');
+            glow.addColorStop(1, weapon.color + '00');
+            c.fillStyle = glow;
+            c.fillRect(-34, -34, 68, 68);
+            c.rotate(this.reduceMotion ? 0 : time * 1.5);
+            c.fillStyle = '#1b1f2a';
+            c.strokeStyle = weapon.color;
+            c.lineWidth = 2.5;
+            c.beginPath();
+            for (let i = 0; i < 6; i++) {
+                const angle = (i / 6) * Math.PI * 2;
+                c.lineTo(Math.cos(angle) * 15, Math.sin(angle) * 15);
+            }
+            c.closePath();
+            c.fill();
+            c.stroke();
+            c.restore();
+            c.textAlign = 'center';
+            c.fillStyle = weapon.color;
+            c.font = '700 14px Microsoft YaHei,sans-serif';
+            c.fillText(weapon.short, p.x, p.y + bob + 5);
+            c.font = '11px Microsoft YaHei,sans-serif';
+            c.fillText(weapon.name, p.x, p.y + bob + 32);
+            c.textAlign = 'left';
+            return;
+        }
         c.save();
         c.translate(p.x, p.y + bob);
         c.rotate(Math.PI / 4);
@@ -983,7 +1287,7 @@ export class Renderer {
         c.textAlign = 'center';
         c.fillStyle = '#eac49a';
         c.font = '13px Microsoft YaHei,sans-serif';
-        c.fillText(`${boss.name} · 重装攻城平台`, 640, 43);
+        c.fillText(`${boss.name} · ${boss.phase === 2 ? '狂暴阶段' : boss.phase === 1 ? '第二阶段' : '重装攻城平台'}`, 640, 43);
         c.fillStyle = '#4a4935';
         c.fillRect(395, 55, 490, 5);
         c.fillStyle = boss.hp < boss.maxHp / 2 ? '#f79867' : '#c6a475';
@@ -1020,6 +1324,10 @@ export class Renderer {
         c.fillStyle = '#516345';
         g.walls.forEach((wall) => {
             if (wall.hp > 0) c.fillRect(wall.x, wall.y, 40, 40);
+        });
+        c.fillStyle = '#d2453a';
+        (g.barrels || []).forEach((b) => {
+            if (!b.dead) c.fillRect(b.x - 8, b.y - 8, 16, 16);
         });
         c.fillStyle = '#f7ad6c';
         g.enemies.forEach((e) => {

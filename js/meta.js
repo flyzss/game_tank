@@ -1,4 +1,4 @@
-import { CHASSIS, TALENTS, ASCENSION } from './config.js';
+import { CHASSIS, TALENTS, ASCENSION, ENEMIES, WEAPONS, UPGRADES, ACHIEVEMENTS } from './config.js';
 
 /**
  * 局外成长存档：余烬碎片、已解锁底盘、天赋等级与余烬等级进度。
@@ -19,6 +19,12 @@ export function defaultMeta() {
         ascension: 0,
         lastRunId: '',
         runs: 0,
+        // 无尽模式最远到达的波次。
+        bestWave: 0,
+        // 图鉴：enemies 为 { 类型: 累计击毁数 }（键存在即已发现），weapons / upgrades 为已发现编号列表。
+        codex: { enemies: {}, weapons: [], upgrades: [] },
+        // 已解锁的成就编号。
+        achievements: [],
     };
 }
 
@@ -45,6 +51,14 @@ export function loadMeta(storage) {
         }
         meta.maxAscension = Math.min(ASCENSION.length, count(saved.maxAscension));
         meta.ascension = Math.min(meta.maxAscension, count(saved.ascension));
+        meta.bestWave = count(saved.bestWave);
+        // 图鉴与成就只保留配置表中存在的条目，旧版本或手工修改的未知编号会被丢弃。
+        for (const [type, kills] of Object.entries(saved.codex?.enemies || {}))
+            if (ENEMIES[type]) meta.codex.enemies[type] = count(kills);
+        const known = (list, table) => [...new Set((Array.isArray(list) ? list : []).filter((id) => table(id)))];
+        meta.codex.weapons = known(saved.codex?.weapons, (id) => WEAPONS[id]);
+        meta.codex.upgrades = known(saved.codex?.upgrades, (id) => UPGRADES.some((u) => u.id === id));
+        meta.achievements = known(saved.achievements, (id) => ACHIEVEMENTS.some((a) => a.id === id));
     } catch {
         /* 存档损坏时使用默认存档。 */
     }
@@ -72,10 +86,29 @@ export function shardsFor(result, salvage = 0) {
 }
 
 /**
+ * 图鉴发现：把一条新发现写入存档。参数 kind 为 enemy / weapon / upgrade，id 为对应编号。
+ * 返回 true 表示这是第一次发现（界面据此提示「图鉴新增」）；未知编号与重复发现返回 false。
+ */
+export function discover(meta, kind, id) {
+    if (kind === 'enemy') {
+        if (!ENEMIES[id] || meta.codex.enemies[id] !== undefined) return false;
+        meta.codex.enemies[id] = 0;
+        return true;
+    }
+    const list = kind === 'weapon' ? meta.codex.weapons : kind === 'upgrade' ? meta.codex.upgrades : null;
+    const valid = kind === 'weapon' ? WEAPONS[id] : UPGRADES.some((u) => u.id === id);
+    if (!list || !valid || list.includes(id)) return false;
+    list.push(id);
+    return true;
+}
+
+/**
  * 结算一局：发放碎片并判定是否解锁下一级余烬等级。
  * 解锁条件：从第 1 关开局（chapter 0）、打通全部战役、且挑战的正是当前最高已解锁等级。
  * 同一 runId 只结算一次，刷新页面或断线重连收到重复结算事件时返回 null。
- * 返回 { earned, unlocked }，unlocked 为新解锁的等级（没有则为 0）。会直接修改 meta。
+ * 同时合并本局各类敌军击毁数到图鉴、更新无尽纪录，并检查成就（首次达成额外发放碎片）。
+ * 返回 { earned, unlocked, achievements, bestWave }：earned 含成就奖励，achievements 为本局新解锁的成就列表，
+ * bestWave 为本局刷新的无尽纪录（未刷新为 0）。会直接修改 meta。
  */
 export function recordRun(meta, result) {
     if (!result?.runId || result.runId === meta.lastRunId) return null;
@@ -84,6 +117,13 @@ export function recordRun(meta, result) {
     const earned = shardsFor(result, meta.talents.salvage || 0);
     meta.shards += earned;
     meta.totalShards += earned;
+    for (const [type, kills] of Object.entries(result.stats?.killsByType || {}))
+        if (ENEMIES[type]) meta.codex.enemies[type] = (meta.codex.enemies[type] || 0) + Math.max(0, Math.floor(kills) || 0);
+    let bestWave = 0;
+    if (result.endless && result.wave > meta.bestWave) {
+        meta.bestWave = result.wave;
+        bestWave = result.wave;
+    }
     let unlocked = 0;
     if (
         result.win &&
@@ -95,7 +135,18 @@ export function recordRun(meta, result) {
         meta.ascension = meta.maxAscension;
         unlocked = meta.maxAscension;
     }
-    return { earned, unlocked };
+    // 成就在碎片与图鉴更新之后检查，「碎片富翁」「图鉴收集者」能把本局收获计算在内。
+    const achievements = [];
+    let bonus = 0;
+    for (const achievement of ACHIEVEMENTS) {
+        if (meta.achievements.includes(achievement.id) || !achievement.check(result, meta)) continue;
+        meta.achievements.push(achievement.id);
+        achievements.push(achievement);
+        bonus += achievement.reward;
+    }
+    meta.shards += bonus;
+    meta.totalShards += bonus;
+    return { earned: earned + bonus, unlocked, achievements, bestWave };
 }
 
 /** 购买底盘：未拥有且碎片足够时扣费解锁并自动选用，返回是否成功。 */

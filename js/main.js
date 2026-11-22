@@ -1,9 +1,9 @@
-import { Game, clamp } from './game.js';
+import { Game, clamp, waveConfigFor } from './game.js';
 import { OnlineSession } from './network.js';
 import { appUrl } from './paths.js';
 import { Renderer } from './renderer.js';
 import { SoundDirector } from './sound.js';
-import { WAVES, UPGRADES, ZONES, FIELD_EVENTS, RARITY, CHASSIS, TALENTS, ASCENSION, iconSvg } from './config.js';
+import { WAVES, UPGRADES, ZONES, FIELD_EVENTS, RARITY, CHASSIS, TALENTS, ASCENSION, ACHIEVEMENTS, BOSS_TYPES, ENEMIES, WEAPONS, iconSvg } from './config.js';
 import {
     loadMeta,
     saveMeta,
@@ -13,6 +13,7 @@ import {
     buyTalent,
     talentCost,
     selectAscension,
+    discover,
 } from './meta.js';
 
 /** 本机存储入口：隐私模式下访问 localStorage 可能直接抛错，此时局外进度只保留在本次会话。 */
@@ -108,6 +109,7 @@ async function startGame() {
         chassis: [meta.selected, meta.selected],
         talents: meta.talents,
         ascension: meta.ascension,
+        endless: $('run-select').value === 'endless',
     });
     document.body.classList.add('playing');
     $('pause-button').disabled = false;
@@ -217,7 +219,7 @@ function showResult(result, reward = null) {
     document.body.classList.remove('playing');
     $('pause-button').disabled = true;
     showModal(
-        `<h2 id="modal-title">${result.win ? '长夜已尽。核心仍亮。' : '防线失守。余烬未熄。'}</h2><p>${result.win ? '二十四道防线，全部守住。裂隙闭合，这座废墟迎来了新的黎明。' : '每一次出击，都更接近黎明。换一种改装，再试一次。'}</p><div class="result-stats"><div><b>${result.score}</b><span>作战积分</span></div><div><b>${result.kills}</b><span>摧毁敌军</span></div><div><b>${formatTime(result.time)}</b><span>行动用时</span></div></div><p>本机最佳 ${result.best} · ${online.active ? '联机合作' : mode === 2 ? '同屏双人' : '单人行动'}${result.ascension ? ` · 余烬等级 ${result.ascension}` : ''}</p>${reward ? `<p class="result-reward">获得余烬碎片 <b>+${reward.earned}</b> · 现有 ${meta.shards}${reward.unlocked ? `<br><span>解锁余烬等级 ${reward.unlocked}：${ASCENSION[reward.unlocked - 1].name} · ${ASCENSION[reward.unlocked - 1].text}</span>` : ''}</p>` : ''}<button class="primary-button" id="again-button">再度出击 <span>→</span></button><button class="secondary-button" id="result-menu">返回主菜单</button>`,
+        `<h2 id="modal-title">${result.win ? '长夜已尽。核心仍亮。' : result.endless ? `坚守到第 ${result.wave} 波。` : '防线失守。余烬未熄。'}</h2><p>${result.win ? '二十四道防线，全部守住。裂隙闭合，这座废墟迎来了新的黎明。' : '每一次出击，都更接近黎明。换一种改装，再试一次。'}</p><div class="result-stats"><div><b>${result.score}</b><span>作战积分</span></div><div><b>${result.kills}</b><span>摧毁敌军</span></div><div><b>${formatTime(result.time)}</b><span>行动用时</span></div></div><p>本机最佳 ${result.best} · ${online.active ? '联机合作' : mode === 2 ? '同屏双人' : '单人行动'}${result.ascension ? ` · 余烬等级 ${result.ascension}` : ''}</p>${reward ? `<p class="result-reward">获得余烬碎片 <b>+${reward.earned}</b> · 现有 ${meta.shards}${reward.unlocked ? `<br><span>解锁余烬等级 ${reward.unlocked}：${ASCENSION[reward.unlocked - 1].name} · ${ASCENSION[reward.unlocked - 1].text}</span>` : ''}${reward.bestWave ? `<br><span>无尽模式新纪录：第 ${reward.bestWave} 波</span>` : result.endless ? `<br>无尽纪录 第 ${meta.bestWave} 波` : ''}</p>${reward.achievements.length ? `<div class="result-achievements">${reward.achievements.map((a) => `<div><b>成就达成 · ${a.name}</b><span>${a.text} 奖励 +${a.reward}</span></div>`).join('')}</div>` : ''}` : ''}<button class="primary-button" id="again-button">再度出击 <span>→</span></button><button class="secondary-button" id="result-menu">返回主菜单</button>`,
     );
     $('again-button').onclick = startGame;
     if (online.active && online.slot !== 1) {
@@ -251,6 +253,17 @@ function handleEvent(event, data) {
     }
     if (event === 'field') toast(`${data.name} · ${data.description}`);
     if (event === 'toast') toast(data);
+    // 图鉴发现：只在本机第一次发现时提示，并立即存档（中途退出也不会丢失）。
+    if (event === 'discover' && discover(meta, data.kind, data.id)) {
+        commitMeta();
+        const name =
+            data.kind === 'enemy'
+                ? ENEMIES[data.id]?.name
+                : data.kind === 'weapon'
+                  ? WEAPONS[data.id]?.name
+                  : UPGRADES.find((u) => u.id === data.id)?.name;
+        if (name) toast(`档案新增：${name}`);
+    }
     if (event === 'finish') {
         // 局外结算：同一局只领取一次碎片（recordRun 按 runId 去重），然后立即存档。
         const reward = recordRun(meta, data);
@@ -279,7 +292,8 @@ function updateHud() {
             game.players.find((player) => player.id === (online.active ? online.slot : 1)) || game.players[0],
         corePercent = Math.ceil((game.core.hp / game.core.maxHp) * 100);
     $('mission-label').textContent = ZONES[game.zone || 0].name;
-    const config = WAVES[Math.max(0, game.wave - 1)],
+    // 无尽模式超过 24 波后循环使用关卡配置，统一通过 waveConfigFor 读取。
+    const config = waveConfigFor(game.wave),
         field = FIELD_EVENTS[config.event];
     $('objective').textContent =
         game.state === 'menu'
@@ -329,13 +343,14 @@ function updateHud() {
                   ? '行动成功 · 全线稳固'
                   : game.state === 'lost'
                     ? '信号丢失 · 防线失守'
-                    : `第 ${game.wave} 波 · 剩余敌军 ${game.enemies.length + Math.max(0, WAVES[game.wave - 1].count - game.spawned)}`;
+                    : `第 ${game.wave} 波${game.endless ? ` · 第 ${game.loop() + 1} 轮` : ''} · 剩余敌军 ${game.enemies.length + Math.max(0, game.waveCount() - game.spawned)}`;
     $('sector-label').textContent =
-        `SECTOR ${String(Math.max(1, game.wave)).padStart(2, '0')} — ${String(WAVES.length).padStart(2, '0')}`;
+        `SECTOR ${String(Math.max(1, game.wave)).padStart(2, '0')} — ${game.endless ? '∞' : String(WAVES.length).padStart(2, '0')}`;
     $('auto-label').textContent = game.autoFire ? '开' : '关';
+    // 无尽模式的进度条按「本轮第几波」显示，每轮重新走一遍 24 格。
+    const step = game.endless ? (Math.max(1, game.wave) - 1) % WAVES.length : game.wave - 1;
     waveSegments.forEach((node, i) => {
-        node.className =
-            i < game.wave - 1 || game.state === 'won' ? 'done' : i === game.wave - 1 ? 'active' : '';
+        node.className = i < step || game.state === 'won' ? 'done' : i === step ? 'active' : '';
     });
 }
 
@@ -355,7 +370,12 @@ function showOnlineMenu(error = '') {
     );
     $('room-error').textContent = error;
     $('create-room').onclick = () =>
-        connectRoom({ type: 'create', chapter: Number($('chapter-select').value), ascension: meta.ascension });
+        connectRoom({
+            type: 'create',
+            chapter: Number($('chapter-select').value),
+            ascension: meta.ascension,
+            endless: $('run-select').value === 'endless',
+        });
     $('join-room').onclick = () => {
         // 只保留数字：允许玩家按语音听到的「123 456」分组带空格输入。
         const code = $('room-code-input').value.replace(/\D/g, '');
@@ -402,7 +422,7 @@ function showLobby(room) {
     const invite = appUrl('index.htm', inviteBase);
     invite.searchParams.set('room', room.code);
     showModal(
-        `<h2 id="modal-title">房间 ${formatRoomCode(room.code)}</h2><p>${ZONES[room.chapter].name}${room.ascension ? ` · 余烬等级 ${room.ascension}` : ''} · P${online.slot} 指挥官<br>复制邀请给队友，两人准备后由房主启动。联机不启用永久天赋，底盘按各自机库选择。</p><div class="room-members">${[
+        `<h2 id="modal-title">房间 ${formatRoomCode(room.code)}</h2><p>${ZONES[room.chapter].name}${room.endless ? ' · 无尽模式' : ''}${room.ascension ? ` · 余烬等级 ${room.ascension}` : ''} · P${online.slot} 指挥官<br>复制邀请给队友，两人准备后由房主启动。联机不启用永久天赋，底盘按各自机库选择。</p><div class="room-members">${[
             1, 2,
         ]
             .map((slot) => {
@@ -497,6 +517,7 @@ document.querySelectorAll('[data-mode]').forEach(
 $('start-button').onclick = startGame;
 $('online-button').onclick = () => showOnlineMenu();
 $('hangar-button').onclick = () => showHangar();
+$('archive-button').onclick = () => showArchive();
 $('ascension-select').onchange = (event) => {
     selectAscension(meta, Number(event.target.value));
     commitMeta();
@@ -505,6 +526,7 @@ refreshMetaMenu();
 /** 刷新主菜单上的碎片数量与余烬等级下拉框（只列出已解锁的等级）。 */
 function refreshMetaMenu() {
     $('hangar-shards').textContent = `余烬碎片 ${meta.shards}`;
+    $('archive-progress').textContent = `成就 ${meta.achievements.length} / ${ACHIEVEMENTS.length}`;
     const select = $('ascension-select');
     select.innerHTML = Array.from({ length: meta.maxAscension + 1 }, (_, level) =>
         level === 0
@@ -514,6 +536,35 @@ function refreshMetaMenu() {
     select.value = String(meta.ascension);
     select.disabled = meta.maxAscension === 0;
     select.title = meta.maxAscension === 0 ? '从第 1 关打通全部战役即可解锁余烬等级 1' : '';
+}
+/**
+ * 档案界面：成就列表（含奖励与达成状态）与图鉴（敌军、特装武器、改装）。
+ * 未发现的条目显示为「？？？」，敌军条目附带累计击毁数，首领单独标注。
+ */
+function showArchive() {
+    const achievementRows = ACHIEVEMENTS.map((a) => {
+        const done = meta.achievements.includes(a.id);
+        return `<li class="${done ? 'done' : ''}"><b>${done ? '✓' : '·'} ${a.name}</b><span>${a.text}</span><em>+${a.reward}</em></li>`;
+    }).join('');
+    const tile = (known, title, detail = '', extra = '') =>
+        `<div class="codex-tile${known ? '' : ' unknown'}${extra}"><b>${known ? title : '？？？'}</b>${known && detail ? `<span>${detail}</span>` : ''}</div>`;
+    const enemyTiles = Object.entries(ENEMIES)
+        .map(([type, data]) => {
+            const kills = meta.codex.enemies[type];
+            return tile(kills !== undefined, data.name, `击毁 ${kills || 0}`, BOSS_TYPES.includes(type) ? ' boss' : '');
+        })
+        .join('');
+    const weaponTiles = Object.entries(WEAPONS)
+        .map(([id, data]) => tile(meta.codex.weapons.includes(id), data.name))
+        .join('');
+    const upgradeTiles = UPGRADES.map((u) =>
+        tile(meta.codex.upgrades.includes(u.id), u.name, (RARITY[u.rarity] || RARITY.common).name, ` rarity-${u.rarity}`),
+    ).join('');
+    const count = (list, total) => `${list} / ${total}`;
+    showModal(
+        `<h2 id="modal-title">档案</h2><p class="hangar-balance">无尽纪录 <b>${meta.bestWave ? `第 ${meta.bestWave} 波` : '暂无'}</b> · 出击 ${meta.runs} 次 · 累计碎片 ${meta.totalShards}</p><h3 class="hangar-heading">成就 <span>${count(meta.achievements.length, ACHIEVEMENTS.length)} · 首次达成发放余烬碎片</span></h3><ul class="achievement-list">${achievementRows}</ul><h3 class="hangar-heading">敌军图鉴 <span>${count(Object.keys(meta.codex.enemies).length, Object.keys(ENEMIES).length)}</span></h3><div class="codex-grid">${enemyTiles}</div><h3 class="hangar-heading">特装武器 <span>${count(meta.codex.weapons.length, Object.keys(WEAPONS).length)}</span></h3><div class="codex-grid">${weaponTiles}</div><h3 class="hangar-heading">改装 <span>${count(meta.codex.upgrades.length, UPGRADES.length)}</span></h3><div class="codex-grid">${upgradeTiles}</div><button id="archive-close" class="primary-button">返回</button>`,
+    );
+    $('archive-close').onclick = hideModal;
 }
 /**
  * 机库界面：选用或解锁底盘、购买永久天赋，并列出余烬等级词条。

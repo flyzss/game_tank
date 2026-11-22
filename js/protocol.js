@@ -91,6 +91,8 @@ export function createSnapshot(game, options = {}) {
         'rerolls',
         // 余烬等级：客户端 HUD 显示当前难度。
         'ascension',
+        // 无尽模式标记：客户端 HUD 据此显示「∞」与轮次。
+        'endless',
         'lastGrade',
         'slowmo',
         'upgrades',

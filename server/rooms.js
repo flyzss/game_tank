@@ -28,6 +28,7 @@ export class RoomManager {
             code: room.code,
             chapter: room.chapter,
             ascension: room.ascension || 0,
+            endless: room.endless === true,
             phase: room.game?.state || 'lobby',
             players: room.peers.map((p) => ({
                 slot: p.slot,
@@ -102,6 +103,8 @@ export class RoomManager {
                     0,
                     Math.min(ASCENSION.length, Number.isInteger(message.ascension) ? message.ascension : 0),
                 ),
+                // 无尽模式由房主创建房间时选择。
+                endless: message.endless === true,
                 peers: [],
                 votes: {},
                 events: [],
@@ -178,6 +181,7 @@ export class RoomManager {
             room.game.start(2, room.chapter, {
                 chassis: room.peers.map((p) => p.chassis || 'standard'),
                 ascension: room.ascension || 0,
+                endless: room.endless === true,
                 talents: {},
             });
             this.status(room);

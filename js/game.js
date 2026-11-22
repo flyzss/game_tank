@@ -6,6 +6,13 @@ export const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const random = (min, max) => min + Math.random() * (max - min);
 const angleTo = (a, b) => Math.atan2(b.y - a.y, b.x - a.x);
 
+/**
+ * 取第 wave 波（从 1 开始）的关卡配置。战役只有 24 波；无尽模式超过 24 波后循环使用同一套配置，
+ * 敌军强度由轮次（loop）另行放大。界面层也用它显示无尽模式的波次信息。
+ */
+export function waveConfigFor(wave) {
+    return WAVES[(Math.max(1, wave) - 1) % WAVES.length];
+}
 /** 判断线段与圆是否相交，避免高速炮弹在低帧率时穿过目标。 */
 function segmentCircle(x1, y1, x2, y2, target, radius) {
     const dx = x2 - x1,
@@ -73,6 +80,12 @@ export class Game {
         // 局外成长：余烬等级（0 为标准难度）与本局生效的天赋等级；start 时按开局参数覆盖。
         this.ascension = 0;
         this.talents = {};
+        // 无尽模式：打完 24 波后不结算胜利，而是进入下一轮更强的循环，直到防线失守。
+        this.endless = false;
+        // 单局统计：供成就与图鉴结算使用，随 finish 事件一并发出。
+        this.stats = { maxCombo: 0, nukes: 0, barrels: 0, sGrades: 0, fevers: 0, evolutions: 0, killsByType: {} };
+        // 本局已发出「发现」事件的条目，避免同一局反复通知界面。
+        this.discovered = new Set();
         // 首领终结慢动作剩余秒数（真实时间），期间模拟按 30% 速度推进。
         this.slowmo = 0;
         // 波次评级统计：本波承受的总伤害（玩家装甲 + 核心）与最高连击；lastGrade 为上一波的评级结果。
@@ -250,7 +263,8 @@ export class Game {
      * 参数 options（均可省略）：
      * - chassis：按玩家顺序排列的底盘编号数组，未知编号回落为标准底盘；
      * - talents：{ 天赋编号: 等级 }，超出范围的等级会被截断（联机时服务器传空对象）；
-     * - ascension：余烬等级 0–10，启用对应及以下全部难度词条。
+     * - ascension：余烬等级 0–10，启用对应及以下全部难度词条；
+     * - endless：为 true 时进入无尽模式。
      */
     start(mode = 1, chapter = 0, options = {}) {
         this.mode = mode;
@@ -258,6 +272,7 @@ export class Game {
         this.chapter = clamp(Math.floor(chapter) || 0, 0, ZONES.length - 1);
         this.wave = this.chapter * 6;
         this.ascension = clamp(Math.floor(options.ascension) || 0, 0, ASCENSION.length);
+        this.endless = options.endless === true;
         this.talents = {};
         for (const talent of TALENTS) {
             const level = Math.floor(options.talents?.[talent.id]) || 0;
@@ -303,14 +318,26 @@ export class Game {
         p.drones += data.drones || 0;
         p.hp = p.maxHp;
     }
-    /** 本波实际生成次数：余烬等级 6「人海战术」使数量 +20%。 */
+    /** 当前波次的关卡配置（无尽模式循环使用 24 波配置）。 */
+    waveConfig() {
+        return waveConfigFor(this.wave);
+    }
+    /** 无尽模式的轮次：第 1–24 波为第 0 轮，25–48 波为第 1 轮，以此类推；战役模式恒为 0。 */
+    loop() {
+        return this.endless ? Math.floor((Math.max(1, this.wave) - 1) / WAVES.length) : 0;
+    }
+    /**
+     * 本波实际生成次数：余烬等级 6「人海战术」使数量 +20%；
+     * 无尽模式每多一轮数量再 +25%（同屏上限仍为 MAX_ENEMIES，多出的敌军排队空投）。
+     */
     waveCount() {
-        return Math.round(WAVES[this.wave - 1].count * (this.asc(6) ? 1.2 : 1));
+        return Math.round(this.waveConfig().count * (this.asc(6) ? 1.2 : 1) * (1 + this.loop() * 0.25));
     }
     /** 每波使用独立生成队列；清场后才进入改装，首领固定出现在最终波。 */
     beginWave() {
         this.wave++;
-        const zone = Math.floor((this.wave - 1) / 6);
+        // 无尽模式的战区按 6 波一换循环：25 波回到灰烬工业区，依此类推。
+        const zone = Math.floor((this.wave - 1) / 6) % ZONES.length;
         if (this.zone !== zone) {
             this.zone = zone;
             this.makeMap();
@@ -335,7 +362,7 @@ export class Game {
         this.bountyPending = false;
         this.eventTimer = 6;
         this.beams = [];
-        const fieldEvent = WAVES[this.wave - 1].event;
+        const fieldEvent = this.waveConfig().event;
         this.placeBarrels(fieldEvent === 'barrels');
         // 火力全开：每名存活玩家立即获得一件随机持续型特装武器（不含核弹），开波就能爽射。
         if (fieldEvent !== 'frenzy' && this.talentLevel('weapon') > 0)
@@ -375,7 +402,9 @@ export class Game {
         this.players.forEach((p) => {
             p.invincible = Math.max(p.invincible, 2);
         });
-        this.onEvent('wave', WAVES[this.wave - 1]);
+        if (this.endless && this.wave > 1 && (this.wave - 1) % WAVES.length === 0)
+            this.announceText(`第 ${this.loop() + 1} 轮`, `无尽模式 · 敌军耐久与数量全面强化`, '#ff9a6a', 2);
+        this.onEvent('wave', this.waveConfig());
         this.onEvent('field', FIELD_EVENTS[fieldEvent]);
     }
     /** 创建敌人时按波次和人数轻度缩放耐久，双人有更多火力但共享核心。 */
@@ -388,7 +417,9 @@ export class Game {
             (data.boss ? 1 + this.upgrades.length * 0.1 : 1) *
             // 余烬等级 1「坚固敌阵」全体 +15%，等级 8「巨像觉醒」首领再 +30%。
             (this.asc(1) ? 1.15 : 1) *
-            (data.boss && this.asc(8) ? 1.3 : 1);
+            (data.boss && this.asc(8) ? 1.3 : 1) *
+            // 无尽模式每多一轮耐久再 +35%（叠加在逐波成长之上）。
+            (1 + this.loop() * 0.35);
         return {
             ...data,
             netId: this.nextEntityId++,
@@ -423,7 +454,7 @@ export class Game {
     }
     /** 敌军从可见空投标记进入，预警期间不移动、不射击。 */
     spawnEnemy() {
-        const config = WAVES[this.wave - 1];
+        const config = this.waveConfig();
         const portals = [
             { x: 160, y: 75 },
             { x: 640, y: 65 },
@@ -542,6 +573,7 @@ export class Game {
     giveWeapon(p, kind) {
         const weapon = WEAPONS[kind];
         if (!weapon) return;
+        this.discover('weapon', kind);
         if (kind === 'nuke') {
             this.triggerNuke(p);
             return;
@@ -557,6 +589,7 @@ export class Game {
      * 首领同样受伤但通常不会被秒杀。参数 p 为拾取者，仅用于定位爆心特效。
      */
     triggerNuke(p) {
+        this.stats.nukes++;
         this.bullets = this.bullets.filter((b) => !b.enemy);
         this.beams = [];
         this.rings.push({ x: p.x, y: p.y, radius: 20, max: 1400, life: 0.9, maxLife: 0.9, color: '#ffd9a0', fill: true });
@@ -569,6 +602,17 @@ export class Game {
         for (const enemy of [...this.enemies])
             if (!enemy.dead && enemy.warning <= 0) this.damageEnemy(enemy, damage, true, angleTo(p, enemy));
         for (const barrel of this.barrels) if (!barrel.dead) this.detonateBarrel(barrel);
+    }
+    /**
+     * 图鉴发现：本局第一次击毁某类敌军、获得某件武器或某张改装时通知界面写入本机图鉴。
+     * 参数 kind 为 enemy / weapon / upgrade，id 为对应编号。菜单演示与重复条目不会发出事件。
+     */
+    discover(kind, id) {
+        if (this.state === 'menu') return;
+        const key = `${kind}:${id}`;
+        if (this.discovered.has(key)) return;
+        this.discovered.add(key);
+        this.onEvent('discover', { kind, id });
     }
     /**
      * 屏幕中央的大字播报。参数 priority 为优先级：连杀 0、狂热与首领阶段 1、核弹与首领终结 2。
@@ -611,6 +655,7 @@ export class Game {
     detonateBarrel(barrel) {
         if (barrel.dead) return;
         barrel.dead = true;
+        this.stats.barrels++;
         this.score += 25;
         this.shake = Math.max(this.shake, 22);
         this.flashScreen(0.3, 0.08);
@@ -629,6 +674,7 @@ export class Game {
         if (this.fever < 100) return;
         this.fever = 0;
         this.feverTime = 8 + (this.players[0]?.feverBonus || 0);
+        this.stats.fevers++;
         this.sound.play('fever');
         this.flashScreen(0.5, 0.14);
         this.announceText('狂热模式！', 'FEVER · 射速翻倍 · 伤害 +35% · 受伤减半', '#ff7ad9', 1);
@@ -675,7 +721,7 @@ export class Game {
             this.finish(false);
             return;
         }
-        const config = WAVES[this.wave - 1];
+        const config = this.waveConfig();
         this.spawnTimer -= dt;
         if (this.spawned < this.waveCount() && this.spawnTimer <= 0 && this.enemies.length < MAX_ENEMIES) {
             this.spawnEnemy();
@@ -897,7 +943,7 @@ export class Game {
     }
     /** 更新战场事件、争夺信标与临时炮台，所有收益和伤害均由同一模拟器结算。 */
     updateField(dt) {
-        const config = WAVES[this.wave - 1];
+        const config = this.waveConfig();
         this.eventTimer -= dt;
         if (config.event === 'bombardment' && this.eventTimer <= 0) {
             this.eventTimer = 5.5;
@@ -1697,6 +1743,9 @@ export class Game {
             this.combo = Math.min(999, this.combo + 1);
             this.comboTime = 3.5;
             this.waveMaxCombo = Math.max(this.waveMaxCombo, this.combo);
+            this.stats.maxCombo = Math.max(this.stats.maxCombo, this.combo);
+            this.stats.killsByType[enemy.type] = (this.stats.killsByType[enemy.type] || 0) + 1;
+            this.discover('enemy', enemy.type);
             this.score += Math.round(enemy.score * Math.min(5, 1 + (this.combo - 1) * 0.05));
             // 击杀音阶：每次击毁按连击数在五声音阶上升一级，连杀时像在弹琴。
             this.sound.play('killnote', { step: this.combo });
@@ -1764,7 +1813,7 @@ export class Game {
             drop('repair', enemy.x, enemy.y + 40);
             return;
         }
-        const frenzy = WAVES[this.wave - 1]?.event === 'frenzy' ? 3 : 1;
+        const frenzy = this.waveConfig().event === 'frenzy' ? 3 : 1;
         if (enemy.affix || enemy.bounty || Math.random() < (enemy.drone ? 0.02 : 0.06) * frenzy * (this.asc(7) ? 0.5 : 1)) {
             drop(randomWeapon());
             return;
@@ -1977,7 +2026,7 @@ export class Game {
     }
     /** 清波补给先恢复全员部分装甲，再提供不重复的三选一改装。 */
     completeWave() {
-        if (this.wave >= WAVES.length) {
+        if (!this.endless && this.wave >= WAVES.length) {
             this.finish(true);
             return;
         }
@@ -2007,7 +2056,10 @@ export class Game {
         const grade = points >= 115 ? 'S' : points >= 95 ? 'A' : points >= 70 ? 'B' : 'C';
         const bonus = { S: 1500, A: 800, B: 300, C: 0 }[grade];
         this.score += bonus;
-        if (grade === 'S') this.rerolls++;
+        if (grade === 'S') {
+            this.rerolls++;
+            this.stats.sGrades++;
+        }
         this.lastGrade = { grade, bonus, damage: Math.round(this.waveDamage), combo: this.waveMaxCombo };
     }
     /**
@@ -2050,6 +2102,8 @@ export class Game {
         this.players.forEach((p) => upgrade.apply(p));
         if (id === 'repair') this.core.hp = Math.min(this.core.maxHp, this.core.hp + 150);
         this.upgrades.push(id);
+        if (upgrade.requires) this.stats.evolutions++;
+        this.discover('upgrade', id);
         this.sound.play('upgrade');
         this.state = 'playing';
         this.onEvent('upgraded', upgrade);
@@ -2103,6 +2157,10 @@ export class Game {
             ascension: this.ascension,
             chapter: this.chapter,
             cleared: win ? WAVES.length - this.chapter * 6 : Math.max(0, this.wave - 1 - this.chapter * 6),
+            // 无尽模式与到达的波次、单局统计（成就与图鉴击毁数在界面层结算）。
+            endless: this.endless,
+            wave: this.wave,
+            stats: this.stats,
         });
     }
 }

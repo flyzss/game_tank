@@ -882,6 +882,104 @@ kbd {
     width: 20px;
     font-family: var(--display);
 }
+/* 档案：成就列表与图鉴方格，未发现条目显示为暗色问号。 */
+.archive-entry {
+    border-color: #7d6aa8;
+    color: #d6c4ff;
+}
+.achievement-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 6px;
+    text-align: left;
+}
+.achievement-list li {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 2px 8px;
+    border: 1px solid var(--line);
+    padding: 7px 9px;
+    font-size: 11px;
+    color: var(--muted);
+}
+.achievement-list li b {
+    font-size: 12px;
+}
+.achievement-list li span {
+    grid-column: 1;
+}
+.achievement-list li em {
+    grid-row: 1 / span 2;
+    grid-column: 2;
+    align-self: center;
+    font-style: normal;
+    color: #ffb35c;
+}
+.achievement-list li.done {
+    border-color: #b98a4e;
+    color: #f3e3c4;
+}
+.achievement-list li.done b {
+    color: #ffd36e;
+}
+.codex-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+    gap: 6px;
+}
+.codex-tile {
+    border: 1px solid #53634c;
+    background: #233027;
+    padding: 7px;
+    text-align: left;
+    font-size: 11px;
+}
+.codex-tile b {
+    display: block;
+    font-size: 12px;
+}
+.codex-tile span {
+    color: var(--muted);
+}
+.codex-tile.boss {
+    border-color: #b9823e;
+}
+.codex-tile.rarity-rare b {
+    color: #7fc8ff;
+}
+.codex-tile.rarity-legendary b {
+    color: #ffb35c;
+}
+.codex-tile.rarity-evolution b {
+    color: #ff7ad9;
+}
+.codex-tile.unknown {
+    background: #161f1a;
+    border-style: dashed;
+    color: #56634f;
+}
+.codex-tile.unknown b {
+    color: #56634f;
+}
+.result-achievements {
+    display: grid;
+    gap: 6px;
+    margin: 0 0 12px;
+}
+.result-achievements div {
+    border: 1px solid #b98a4e;
+    padding: 6px 10px;
+    font-size: 11px;
+    color: #f3e3c4;
+}
+.result-achievements b {
+    display: block;
+    color: #ffd36e;
+    font-size: 13px;
+}
 .result-reward {
     color: #f3c98a;
 }

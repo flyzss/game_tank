@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../js/game.js';
-import { CHASSIS, TALENTS, ASCENSION, WAVES } from '../js/config.js';
+import { CHASSIS, TALENTS, ASCENSION, WAVES, ACHIEVEMENTS, ENEMIES, BOSS_TYPES } from '../js/config.js';
 import {
     META_KEY,
     defaultMeta,
@@ -14,6 +14,7 @@ import {
     buyTalent,
     talentCost,
     selectAscension,
+    discover,
 } from '../js/meta.js';
 import { RoomManager } from '../server/rooms.js';
 
@@ -57,10 +58,12 @@ test('碎片结算按积分、波数、胜利、余烬等级与打捞天赋计�
     assert.equal(shardsFor({ score: 0, cleared: 2, ascension: 0 }, 2), Math.round(10 * 1.3));
     const meta = defaultMeta();
     const first = recordRun(meta, { runId: 'a', score: 5000, cleared: 3, win: false, chapter: 0, ascension: 0 });
-    assert.equal(first.earned, 25);
-    assert.equal(meta.shards, 25);
+    // 基础 25 碎片 + 首次完成作战的「初次出击」成就奖励 50。
+    assert.equal(first.earned, 75);
+    assert.deepEqual(first.achievements.map((a) => a.id), ['firstRun']);
+    assert.equal(meta.shards, 75);
     assert.equal(recordRun(meta, { runId: 'a', score: 5000, cleared: 3 }), null);
-    assert.equal(meta.shards, 25);
+    assert.equal(meta.shards, 75);
 });
 
 test('余烬等级只有从第 1 关打通当前最高等级才会解锁下一级', () => {
@@ -186,4 +189,92 @@ test('联机房间只接受合法底盘编号与等级范围，开局不读取�
     assert.deepEqual(room.game.players.map((p) => p.chassis), ['heavy', 'standard']);
     assert.equal(room.game.ascension, ASCENSION.length);
     assert.deepEqual(room.game.talents, {});
+});
+
+test('无尽模式打完 24 波不结算胜利，进入下一轮并循环战区与强化敌军', () => {
+    const g = startGame({ endless: true });
+    g.wave = WAVES.length;
+    g.enemies = [];
+    g.completeWave();
+    assert.equal(g.state, 'upgrade', '无尽模式第 24 波后继续改装而非胜利');
+    g.chooseUpgrade(g.choices[0].id);
+    assert.equal(g.wave, WAVES.length + 1);
+    assert.equal(g.zone, 0, '第 25 波回到第一战区');
+    assert.equal(g.loop(), 1);
+    assert.equal(g.waveConfig(), WAVES[0]);
+    assert.equal(g.waveCount(), Math.round(WAVES[0].count * 1.25));
+    assert.equal(g.announce.text, '第 2 轮');
+    const campaign = startGame();
+    campaign.wave = WAVES.length + 1;
+    const strong = g.makeEnemy('raider', 0, 0),
+        normal = campaign.makeEnemy('raider', 0, 0);
+    assert.ok(Math.abs(strong.maxHp / normal.maxHp - 1.35) < 1e-9);
+});
+
+test('单局统计与发现事件：首次击毁、获得武器与改装各通知一次', () => {
+    const events = [];
+    const g = new Game({ play() {}, update() {} }, (type, data) => events.push({ type, data }));
+    g.start(1, 0);
+    g.walls = [];
+    g.barrels = [];
+    for (let i = 0; i < 3; i++) {
+        const e = g.makeEnemy('scout', 200 + i * 80, 200);
+        e.warning = 0;
+        g.enemies.push(e);
+        g.damageEnemy(e, 9999);
+    }
+    g.giveWeapon(g.players[0], 'fan');
+    g.giveWeapon(g.players[0], 'fan');
+    const found = events.filter((e) => e.type === 'discover').map((e) => `${e.data.kind}:${e.data.id}`);
+    assert.deepEqual(found, ['enemy:scout', 'weapon:fan']);
+    assert.equal(g.stats.killsByType.scout, 3);
+    assert.equal(g.stats.maxCombo, 3);
+    g.finish(false);
+    const result = events.find((e) => e.type === 'finish').data;
+    assert.equal(result.stats.killsByType.scout, 3);
+    assert.equal(result.endless, false);
+});
+
+test('图鉴写入、击毁累计与成就结算：首领猎手、无尽三十波、图鉴收集者', () => {
+    const meta = defaultMeta();
+    assert.equal(discover(meta, 'enemy', 'scout'), true);
+    assert.equal(discover(meta, 'enemy', 'scout'), false);
+    assert.equal(discover(meta, 'enemy', 'hacked'), false);
+    assert.equal(discover(meta, 'weapon', 'nuke'), true);
+    assert.equal(discover(meta, 'upgrade', 'pinball'), true);
+    const killsByType = Object.fromEntries(BOSS_TYPES.map((type) => [type, 1]));
+    const reward = recordRun(meta, {
+        runId: 'r1',
+        score: 0,
+        cleared: 29,
+        endless: true,
+        wave: 30,
+        stats: { killsByType: { ...killsByType, scout: 5 } },
+    });
+    assert.equal(meta.codex.enemies.scout, 5);
+    assert.equal(meta.bestWave, 30);
+    assert.equal(reward.bestWave, 30);
+    const ids = reward.achievements.map((a) => a.id);
+    assert.ok(ids.includes('bossHunter') && ids.includes('endless30') && ids.includes('firstRun'));
+    assert.ok(!ids.includes('collector'));
+    const bonus = reward.achievements.reduce((sum, a) => sum + a.reward, 0);
+    assert.equal(reward.earned, Math.round(29 * 5) + bonus);
+    // 补齐全部敌军后，下一局解锁「图鉴收集者」，已解锁的成就不会重复发放。
+    for (const type of Object.keys(ENEMIES)) discover(meta, 'enemy', type);
+    const next = recordRun(meta, { runId: 'r2', score: 0, cleared: 0, stats: {} });
+    assert.deepEqual(next.achievements.map((a) => a.id), ['collector']);
+    assert.equal(meta.achievements.length, new Set(meta.achievements).size);
+    assert.ok(meta.achievements.every((id) => ACHIEVEMENTS.some((a) => a.id === id)));
+});
+
+test('旧版存档（没有图鉴与成就字段）可以正常读取，未知条目被丢弃', () => {
+    const storage = memoryStorage({
+        [META_KEY]: JSON.stringify({ shards: 10, codex: { enemies: { scout: 3, ghost: 9 }, weapons: ['fan', 'bfg'], upgrades: 'x' }, achievements: ['dawn', 'cheat'] }),
+    });
+    const meta = loadMeta(storage);
+    assert.deepEqual(meta.codex.enemies, { scout: 3 });
+    assert.deepEqual(meta.codex.weapons, ['fan']);
+    assert.deepEqual(meta.codex.upgrades, []);
+    assert.deepEqual(meta.achievements, ['dawn']);
+    assert.equal(loadMeta(memoryStorage({ [META_KEY]: JSON.stringify({ shards: 5 }) })).bestWave, 0);
 });

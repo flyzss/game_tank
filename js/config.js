@@ -661,6 +661,49 @@ export const ASCENSION = [
     { level: 9, name: '情报封锁', text: '每局改装刷新 −1。' },
     { level: 10, name: '余烬终焉', text: '狂热值积攒速度 −30%。' },
 ];
+/** 四位首领的类型编号，用于「首领猎手」成就与图鉴分组。 */
+export const BOSS_TYPES = ['boss', 'frostBoss', 'infernoBoss', 'riftBoss'];
+/**
+ * 成就：每局结算时检查，首次达成发放 reward 余烬碎片。
+ * check(result, meta) 中 result 为模拟层 finish 事件数据（含 stats 单局统计），
+ * meta 为已合并本局图鉴后的存档；每个成就只会解锁一次。
+ */
+export const ACHIEVEMENTS = [
+    { id: 'firstRun', name: '初次出击', text: '完成任意一局作战。', reward: 50, check: () => true },
+    { id: 'dawn', name: '黎明守护者', text: '打通二十四波战役。', reward: 300, check: (r) => r.win },
+    { id: 'combo100', name: '百连斩', text: '单局最高连击达到 100。', reward: 150, check: (r) => r.stats?.maxCombo >= 100 },
+    { id: 'nuker', name: '核爆专家', text: '单局拾取 3 枚清屏核弹。', reward: 150, check: (r) => r.stats?.nukes >= 3 },
+    { id: 'evolved', name: '进化体', text: '单局获得一张进化改装。', reward: 100, check: (r) => r.stats?.evolutions >= 1 },
+    {
+        id: 'allEvolutions',
+        name: '完全进化',
+        text: '图鉴中集齐全部进化改装。',
+        reward: 300,
+        check: (r, m) => UPGRADES.filter((u) => u.requires).every((u) => m.codex.upgrades.includes(u.id)),
+    },
+    { id: 'perfect', name: '完美防线', text: '单局获得 5 次 S 级波次评价。', reward: 200, check: (r) => r.stats?.sGrades >= 5 },
+    { id: 'pyro', name: '油桶艺术家', text: '单局引爆 30 个燃料桶。', reward: 150, check: (r) => r.stats?.barrels >= 30 },
+    {
+        id: 'bossHunter',
+        name: '首领猎手',
+        text: '累计击毁全部四位首领。',
+        reward: 250,
+        check: (r, m) => BOSS_TYPES.every((type) => m.codex.enemies[type] !== undefined),
+    },
+    { id: 'endless30', name: '无尽 · 三十波', text: '无尽模式坚持到第 30 波。', reward: 250, check: (r) => r.endless && r.wave >= 30 },
+    { id: 'endless50', name: '无尽 · 五十波', text: '无尽模式坚持到第 50 波。', reward: 500, check: (r) => r.endless && r.wave >= 50 },
+    { id: 'asc5', name: '余烬五阶', text: '在余烬等级 5 及以上打通战役。', reward: 300, check: (r) => r.win && r.ascension >= 5 },
+    { id: 'asc10', name: '余烬终焉', text: '在余烬等级 10 打通战役。', reward: 800, check: (r) => r.win && r.ascension >= 10 },
+    { id: 'fever10', name: '狂热成瘾', text: '单局进入狂热模式 10 次。', reward: 150, check: (r) => r.stats?.fevers >= 10 },
+    {
+        id: 'collector',
+        name: '图鉴收集者',
+        text: '累计击毁过全部种类的敌军。',
+        reward: 300,
+        check: (r, m) => Object.keys(ENEMIES).every((type) => m.codex.enemies[type] !== undefined),
+    },
+    { id: 'rich', name: '碎片富翁', text: '累计获得 5000 余烬碎片。', reward: 200, check: (r, m) => m.totalShards >= 5000 },
+];
 /** 改装图标使用统一描边的 SVG，而不是依赖表情符号字体。 */
 export function iconSvg(kind) {
     const paths = {

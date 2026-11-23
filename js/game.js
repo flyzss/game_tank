@@ -75,6 +75,11 @@ export class Game {
         this.streak = 0;
         this.streakTimer = 0;
         this.announce = null;
+        // 夸赞播报：praiseQueue 为待播的夸赞大字，等当前高优先级播报快结束时依次播出，避免互相覆盖；
+        // clutchCd 为「千钧一发」的冷却秒数；waveCoreMin 为本波核心耐久的最低比例，用于判定「力挽狂澜」。
+        this.praiseQueue = [];
+        this.clutchCd = 0;
+        this.waveCoreMin = 1;
         // 每局 2 次改装刷新；S 级评价额外奖励 1 次。
         this.rerolls = 2;
         // 局外成长：余烬等级（0 为标准难度）与本局生效的天赋等级；start 时按开局参数覆盖。
@@ -355,6 +360,7 @@ export class Game {
         this.waveDamage = 0;
         this.waveMaxCombo = 0;
         this.waveDelay = 0;
+        this.waveCoreMin = this.core.hp / this.core.maxHp;
         this.hazards = [];
         this.turrets = [];
         this.beacon = null;
@@ -618,9 +624,38 @@ export class Game {
      * 屏幕中央的大字播报。参数 priority 为优先级：连杀 0、狂热与首领阶段 1、核弹与首领终结 2。
      * 当前播报仍在显示且优先级更高时，新的低优先级播报被丢弃，避免高光时刻被连杀刷掉。
      */
-    announceText(text, sub, color = '#ffd36e', priority = 0) {
+    announceText(text, sub, color = '#ffd36e', priority = 0, praise = false) {
         if (this.announce && this.announce.life > 0 && (this.announce.priority || 0) > priority) return;
-        this.announce = { text, sub, color, life: 1.6, maxLife: 1.6, priority };
+        // praise 为夸赞播报：渲染器据此加大字号并画出金色横幅；只在为真时写入字段，节省快照体积。
+        this.announce = { text, sub, color, life: praise ? 2 : 1.6, maxLife: praise ? 2 : 1.6, priority };
+        if (praise) this.announce.praise = 1;
+    }
+    /**
+     * 夸赞播报入队：参数 text 为大字、sub 为副标题、color 为主色。
+     * 队列中的夸赞以优先级 2 播出，并伴随连杀音效；队列最多保留 3 条，超出时丢弃最旧的，防止积压。
+     */
+    praise(text, sub, color = '#ffd36e') {
+        this.praiseQueue.push({ text, sub, color });
+        if (this.praiseQueue.length > 3) this.praiseQueue.shift();
+    }
+    /** 每帧检查夸赞队列：当前播报为空或剩余不足 0.35 秒时播出下一条。参数 dt 为帧时长（秒）。 */
+    updatePraise(dt) {
+        this.clutchCd = Math.max(0, this.clutchCd - dt);
+        if (!this.praiseQueue.length || (this.announce && this.announce.life > 0.35)) return;
+        const next = this.praiseQueue.shift();
+        this.announceText(next.text, next.sub, next.color, 2, true);
+        this.sound.play('streak', { strength: 2 });
+    }
+    /**
+     * 清场夸赞：本波最后一名敌人倒下的瞬间调用一次，按本波表现挑选最贴切的一句：
+     * 核心曾跌破 25% → 力挽狂澜；零承伤 → 所向披靡；承伤 < 25 → 游刃有余；最高连击 ≥ 30 → 酣畅淋漓。
+     * 以上都不满足时不播报，保持夸赞的分量。
+     */
+    praiseWaveClear() {
+        if (this.waveCoreMin <= 0.25) this.praise('力挽狂澜！', '核心濒危之际守住了防线', '#ff9a6a');
+        else if (this.waveDamage <= 0) this.praise('所向披靡！', `第 ${this.wave} 波 · 零承伤清场`, '#ffe28a');
+        else if (this.waveDamage < 25) this.praise('游刃有余！', `第 ${this.wave} 波 · 仅承伤 ${Math.round(this.waveDamage)}`, '#c8f59a');
+        else if (this.waveMaxCombo >= 30) this.praise('酣畅淋漓！', `本波最高 ${this.waveMaxCombo} 连击`, '#ff9ad9');
     }
     /**
      * 通用爆炸结算：对半径内敌军造成范围伤害（不受盾卫护盾影响），可选波及玩家与混凝土掩体，并引爆附近油桶。
@@ -717,6 +752,8 @@ export class Game {
         this.updatePickups(dt);
         this.updateField(dt);
         this.updateEffects(dt);
+        this.updatePraise(dt);
+        this.waveCoreMin = Math.min(this.waveCoreMin, this.core.hp / this.core.maxHp);
         if (this.core.hp <= 0) {
             this.finish(false);
             return;
@@ -728,6 +765,8 @@ export class Game {
             this.spawnTimer = config.interval;
         }
         if (this.spawned >= this.waveCount() && !this.enemies.length) {
+            // 清场后的第一帧（waveDelay 仍为 0）结算夸赞，只触发一次。
+            if (this.waveDelay === 0) this.praiseWaveClear();
             this.waveDelay += dt;
             if (this.waveDelay > 2) this.completeWave();
         }
@@ -1753,7 +1792,9 @@ export class Game {
             this.burst(enemy.x, enemy.y, enemy.color, enemy.boss ? 40 : enemy.drone ? 4 : 10, enemy.boss ? 320 : 220, 'debris');
             if (enemy.boss) {
                 this.slowmo = 0.9;
-                this.announceText('终结！', `${enemy.name} 已被击毁`, '#ffd36e', 2);
+                // 核心耐久仍在 80% 以上时击杀首领，升格为「一战封神」夸赞。
+                if (this.core.hp / this.core.maxHp >= 0.8) this.announceText('一战封神！', `${enemy.name} 已被击毁 · 核心几乎无损`, '#ffe28a', 2, true);
+                else this.announceText('终结！', `${enemy.name} 已被击毁`, '#ffd36e', 2);
             }
             this.shake = Math.max(this.shake, enemy.boss ? 40 : enemy.drone ? 10 : 22);
             // 击毁停顿只在冷却结束时触发（首领例外），清屏时依然流畅。
@@ -1856,6 +1897,14 @@ export class Game {
         }
         // 狂热值：普通 4、精英/悬赏 15、首领直接灌满；无人机只给 1.5，避免蜂群波狂热永不停。
         this.addFever(enemy.boss ? 100 : enemy.affix || enemy.bounty ? 15 : enemy.drone ? 1.5 : 4);
+        // 连击里程碑夸赞：20 / 50 / 100 / 200 / 300 连击各播报一次（连击中断后重新计数可再次触发）。
+        const milestones = { 20: '势如破竹！', 50: '势不可挡！', 100: '万夫莫敌！', 200: '天下无双！', 300: '战神降临！' };
+        if (milestones[this.combo]) this.praise(milestones[this.combo], `${this.combo} COMBO · 火力压制全场`, this.combo >= 100 ? '#ff7ad9' : '#ffd36e');
+        // 千钧一发：在核心附近（核心半径 + 70 以内）击毁敌人，说明刚刚挡下了一次直接威胁；冷却 10 秒。
+        if (this.clutchCd <= 0 && !enemy.drone && distance(enemy, this.core) < this.core.radius + 70) {
+            this.clutchCd = 10;
+            this.announceText('千钧一发！', '核心前拦下了敌军', '#9fe8ff', 1, true);
+        }
         // 连杀：0.6 秒内连续击毁计入同一轮，达到 3/6/10/15/25 时播报大字。
         this.streak++;
         this.streakTimer = 0.6;

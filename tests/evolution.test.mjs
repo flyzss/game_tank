@@ -179,8 +179,55 @@ test('击毁触发音阶与残骸碎片，首领终结进入慢动作并按 30% 
 
 test('高优先级播报（首领终结）不会被同时触发的连杀播报覆盖', () => {
     const { g } = setup();
+    // 核心耐久低于 80% 时首领终结播报为「终结！」（高耐久时会升格为「一战封神」夸赞）。
+    g.core.hp = g.core.maxHp * 0.5;
     g.damageEnemy(enemyAt(g, 'boss', 640, 200), 1e7);
     assert.equal(g.announce.text, '终结！');
     for (let i = 0; i < 6; i++) g.damageEnemy(enemyAt(g, 'scout', 200 + i * 60, 400), 9999);
     assert.equal(g.announce.text, '终结！');
+});
+
+test('核心高耐久击杀首领升格为「一战封神」夸赞播报', () => {
+    const { g } = setup();
+    g.damageEnemy(enemyAt(g, 'boss', 640, 200), 1e7);
+    assert.equal(g.announce.text, '一战封神！');
+    assert.equal(g.announce.praise, 1);
+});
+
+test('零承伤清场播报「所向披靡」，核心曾跌破 25% 清场播报「力挽狂澜」', () => {
+    const clear = (prepare) => {
+        const { g } = setup();
+        g.enemies = [];
+        g.spawned = g.waveCount();
+        g.announce = null;
+        prepare(g);
+        // 第一帧清场入队，第二帧当前无播报时播出。
+        g.update(0.016);
+        g.update(0.016);
+        return g.announce;
+    };
+    const flawless = clear(() => {});
+    assert.equal(flawless.text, '所向披靡！');
+    assert.equal(flawless.praise, 1);
+    const clutch = clear((g) => g.hurtCore(g.core.maxHp * 0.8));
+    assert.equal(clutch.text, '力挽狂澜！');
+});
+
+test('连击达到 20 时播报「势如破竹」夸赞', () => {
+    const { g, sounds } = setup();
+    for (let i = 0; i < 20; i++) g.damageEnemy(enemyAt(g, 'scout', 200 + (i % 10) * 60, 200 + Math.floor(i / 10) * 60), 9999);
+    g.announce = null;
+    g.updatePraise(0.016);
+    assert.equal(g.announce.text, '势如破竹！');
+    assert.ok(sounds.includes('streak'));
+});
+
+test('在核心附近击毁敌人播报「千钧一发」，并进入 10 秒冷却', () => {
+    const { g } = setup();
+    g.announce = null;
+    g.damageEnemy(enemyAt(g, 'raider', g.core.x + 60, g.core.y - 20), 9999);
+    assert.equal(g.announce.text, '千钧一发！');
+    g.announce = null;
+    g.damageEnemy(enemyAt(g, 'raider', g.core.x - 60, g.core.y - 20), 9999);
+    assert.ok(!g.announce || g.announce.text !== '千钧一发！');
 });

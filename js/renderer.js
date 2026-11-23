@@ -723,6 +723,52 @@ export class Renderer {
         c.fillStyle = '#d9ebbb';
         c.fillText('CORE', x, y + 65);
         c.textAlign = 'left';
+        this.drawCoreBar(c, core, time);
+    }
+    /**
+     * 核心头顶血条：移动端 HUD 被压缩时，玩家仍能直接在战场上看到核心状态。
+     * 参数 core 为核心对象（仅用 x、y、hp、maxHp、hit），time 为渲染时间（秒）。
+     * 规则：比例 > 60% 绿色、> 30% 黄色、其余红色并闪烁；受伤后白色「残影」在 0.5 秒左右追上当前值，
+     * 让玩家看清这一下掉了多少。残影只存在渲染器本地，不进入联机快照。
+     */
+    drawCoreBar(c, core, time) {
+        const ratio = clamp(core.hp / core.maxHp, 0, 1);
+        // 残影比例：回血时立即跟上，掉血时每帧收拢 1%（60 帧下约 0.5 秒追平一次普通受击）。
+        if (this.coreTrail === undefined || ratio >= this.coreTrail) this.coreTrail = ratio;
+        else this.coreTrail = Math.max(ratio, this.coreTrail - 0.01);
+        // 尺寸按手机竖屏（画布缩到约 0.3 倍）仍能辨认来定：宽 180、高 18 逻辑像素。
+        const width = 180,
+            height = 18,
+            bx = core.x - width / 2,
+            by = core.y - 90;
+        const color = ratio > 0.6 ? '#8fe07a' : ratio > 0.3 ? '#f2c94c' : '#ff5f4f';
+        c.save();
+        // 底板与描边。
+        c.fillStyle = '#0b1310dd';
+        c.fillRect(bx - 3, by - 3, width + 6, height + 6);
+        c.strokeStyle = core.hit > 0 ? '#fff1c2' : '#a8c79a88';
+        c.lineWidth = 1.5;
+        c.strokeRect(bx - 3, by - 3, width + 6, height + 6);
+        // 残影（刚失去的部分）与当前耐久。
+        c.fillStyle = '#fff3d6cc';
+        c.fillRect(bx, by, width * this.coreTrail, height);
+        c.fillStyle = color;
+        if (ratio <= 0.3) c.globalAlpha = 0.65 + Math.sin(time * 10) * 0.35;
+        c.fillRect(bx, by, width * ratio, height);
+        c.globalAlpha = 1;
+        // 每 10% 一道刻度，便于估算剩余量。
+        c.fillStyle = '#0b131066';
+        for (let i = 1; i < 10; i++) c.fillRect(bx + (width * i) / 10 - 0.5, by, 1, height);
+        // 数值：百分比放在血条中央，描边保证任意底色下可读。
+        c.textAlign = 'center';
+        c.font = '700 15px Chakra, Microsoft YaHei, sans-serif';
+        c.lineWidth = 3;
+        c.strokeStyle = '#0b1310';
+        const label = `核心 ${Math.ceil(ratio * 100)}%`;
+        c.strokeText(label, core.x, by + 14);
+        c.fillStyle = '#f7f3e3';
+        c.fillText(label, core.x, by + 14);
+        c.restore();
     }
     /** 坦克由履带、斜面车体、散热格栅、炮塔与后坐炮管组成，两层朝向互相独立。 */
     drawTank(c, tank, enemy, time) {
@@ -1114,17 +1160,33 @@ export class Renderer {
         c.fillText(active ? `FEVER 狂热中 ${g.feverTime.toFixed(1)}s` : `狂热值 ${Math.floor(g.fever || 0)}%`, 640, y - 8);
         c.textAlign = 'left';
     }
-    /** 屏幕中央大字播报：出现时从 1.6 倍缩放回落并淡出，用于连杀、狂热、核弹与首领阶段。 */
+    /** 屏幕中央大字播报：出现时从 1.6 倍缩放回落并淡出，用于连杀、狂热、核弹、首领阶段与夸赞（praise 带横幅）。 */
     drawAnnounce(c, a) {
         if (!a) return;
         const t = clamp(a.life / a.maxLife, 0, 1);
         const scale = this.reduceMotion ? 1 : 1 + Math.max(0, t - 0.8) * 3;
         c.save();
         c.translate(640, 250);
-        c.scale(scale, scale);
         c.globalAlpha = Math.min(1, t * 2.5);
+        // 夸赞播报（a.praise）：先画一条横贯屏幕的暗色横幅与两道主色光边，横幅从中央向两侧展开，
+        // 再配合更大的字号，让「所向披靡」「力挽狂澜」这类高光时刻比普通连杀更有分量。
+        if (a.praise) {
+            const open = this.reduceMotion ? 1 : clamp((1 - t) * 6, 0, 1),
+                half = 640 * open;
+            c.fillStyle = '#0a0d10b8';
+            c.fillRect(-half, -62, half * 2, 112);
+            c.fillStyle = a.color;
+            c.fillRect(-half, -64, half * 2, 3);
+            c.fillRect(-half, 47, half * 2, 3);
+            const glow = c.createRadialGradient(0, -12, 10, 0, -12, 320);
+            glow.addColorStop(0, a.color + '55');
+            glow.addColorStop(1, a.color + '00');
+            c.fillStyle = glow;
+            c.fillRect(-half, -62, half * 2, 112);
+        }
+        c.scale(scale, scale);
         c.textAlign = 'center';
-        c.font = '700 54px Chakra, Microsoft YaHei, sans-serif';
+        c.font = `700 ${a.praise ? 76 : 54}px Chakra, Microsoft YaHei, sans-serif`;
         c.lineWidth = 6;
         c.strokeStyle = '#140d12';
         c.strokeText(a.text, 0, 0);
@@ -1132,9 +1194,11 @@ export class Renderer {
         c.fillText(a.text, 0, 0);
         c.font = '700 14px Chakra, Microsoft YaHei, sans-serif';
         c.lineWidth = 3;
-        c.strokeText(a.sub || '', 0, 28);
+        const subY = a.praise ? 36 : 28;
+        if (a.praise) c.font = '700 18px Chakra, Microsoft YaHei, sans-serif';
+        c.strokeText(a.sub || '', 0, subY);
         c.fillStyle = '#f3ead0';
-        c.fillText(a.sub || '', 0, 28);
+        c.fillText(a.sub || '', 0, subY);
         c.restore();
     }
     /** 弹道采用亮色弹头与短拖尾，敌我双色在深色地面上保持区分。 */
